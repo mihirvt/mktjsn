@@ -18,6 +18,7 @@ export function middleware(request: NextRequest) {
 
   // If no token exists, but we are in local mode, check if we should redirect to sign-in
   const isSignInPage = request.nextUrl.pathname === '/sign-in' || request.nextUrl.pathname === '/sign-up';
+  const token = request.cookies.get(OSS_TOKEN_COOKIE);
 
   if (!token && !isSignInPage) {
     // For now, let's check an env var or just default to showing sign-in if we want login enabled
