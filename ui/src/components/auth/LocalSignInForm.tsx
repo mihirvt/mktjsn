@@ -1,15 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { useState } from 'react';
+import { toast } from 'sonner';
+
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { createAuthService } from '@/lib/auth/services';
 import { LocalAuthService } from '@/lib/auth/services/localAuthService';
-import { Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
 
 export function LocalSignInForm() {
     const [email, setEmail] = useState('');
@@ -30,7 +31,7 @@ export function LocalSignInForm() {
             } else {
                 toast.error('Invalid email or password');
             }
-        } catch (error) {
+        } catch {
             toast.error('An error occurred during login');
         } finally {
             setLoading(false);
@@ -72,7 +73,7 @@ export function LocalSignInForm() {
                         {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Sign In'}
                     </Button>
                     <div className="text-sm text-center text-gray-500">
-                        Don't have an account?{' '}
+                        Don&apos;t have an account?{' '}
                         <button
                             type="button"
                             onClick={() => router.push('/sign-up')}

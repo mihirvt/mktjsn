@@ -3,8 +3,8 @@
 import { Loader2 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 
-import Footer from './Footer';
 import { LocalSignInForm } from './auth/LocalSignInForm';
+import Footer from './Footer';
 
 // Only load Stack's SignIn component when Stack provider is active
 const SignIn = dynamic(

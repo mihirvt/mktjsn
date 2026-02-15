@@ -1,15 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { useState } from 'react';
+import { toast } from 'sonner';
+
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { createAuthService } from '@/lib/auth/services';
 import { LocalAuthService } from '@/lib/auth/services/localAuthService';
-import { Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
 
 export function LocalSignUpForm() {
     const [email, setEmail] = useState('');
@@ -35,7 +36,7 @@ export function LocalSignUpForm() {
             } else {
                 toast.error('Registration failed. Email might already be in use.');
             }
-        } catch (error) {
+        } catch {
             toast.error('An error occurred during registration');
         } finally {
             setLoading(false);
