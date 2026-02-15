@@ -25,18 +25,63 @@ export class LocalAuthService implements IAuthService {
   }
 
   private async initializeAuth(): Promise<void> {
+    if (typeof window === 'undefined') return;
+
     try {
+      // Fetch current auth state from our API (which reads cookies)
       const response = await fetch('/api/auth/oss');
       if (response.ok) {
         const data = await response.json();
         this.currentToken = data.token;
         this.currentUser = data.user;
-        logger.info('OSS auth initialized', { user: data.user });
+        logger.info('Local auth initialized', { user: data.user });
       } else {
-        logger.error('Failed to initialize OSS auth');
+        logger.error('Failed to initialize local auth');
       }
     } catch (error) {
-      logger.error('Error initializing OSS auth', error);
+      logger.error('Error initializing local auth', error);
+    }
+  }
+
+  async login(email: string, password: string): Promise<boolean> {
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        this.currentToken = data.token;
+        this.currentUser = data.user;
+        return true;
+      }
+      return false;
+    } catch (error) {
+      logger.error('Login error', error);
+      return false;
+    }
+  }
+
+  async register(email: string, password: string): Promise<boolean> {
+    try {
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        this.currentToken = data.token;
+        this.currentUser = data.user;
+        return true;
+      }
+      return false;
+    } catch (error) {
+      logger.error('Registration error', error);
+      return false;
     }
   }
 
@@ -86,8 +131,7 @@ export class LocalAuthService implements IAuthService {
   }
 
   isAuthenticated(): boolean {
-    // In local mode, always authenticated
-    return true;
+    return !!this.currentToken;
   }
 
   redirectToLogin(): void {
@@ -96,10 +140,18 @@ export class LocalAuthService implements IAuthService {
   }
 
   async logout(): Promise<void> {
-    // In OSS mode, logout would require server-side cookie clearing
-    // For now, just clear the cached user
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (error) {
+      logger.error('Logout error', error);
+    }
     this.currentUser = null;
-    logger.info('Logout requested in OSS mode - server cookies need to be cleared');
+    this.currentToken = null;
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('dograh_auth_token');
+      localStorage.removeItem('dograh_auth_user');
+    }
+    logger.info('Logged out from local mode');
   }
 
   getProviderName(): string {

@@ -9,18 +9,29 @@ function generateOSSToken(): string {
 }
 
 export function middleware(request: NextRequest) {
+  console.log('[Middleware] Running for:', request.nextUrl.pathname);
   const authProvider = process.env.NEXT_PUBLIC_AUTH_PROVIDER || 'stack';
+  console.log('[Middleware] Auth Provider:', authProvider);
 
   // Only handle OSS mode
   if (authProvider !== 'local') {
     return NextResponse.next();
   }
 
-  const response = NextResponse.next();
-  const token = request.cookies.get(OSS_TOKEN_COOKIE)?.value;
+  // If no token exists, but we are in local mode, check if we should redirect to sign-in
+  const isSignInPage = request.nextUrl.pathname === '/sign-in' || request.nextUrl.pathname === '/sign-up';
+  const token = request.cookies.get(OSS_TOKEN_COOKIE);
 
-  // If no token exists, create one
-  if (!token) {
+  if (!token && !isSignInPage) {
+    // For now, let's check an env var or just default to showing sign-in if we want login enabled
+    if (process.env.NEXT_PUBLIC_LOCAL_AUTH_ENABLED === 'true') {
+      const url = request.nextUrl.clone();
+      url.pathname = '/sign-in';
+      return NextResponse.redirect(url);
+    }
+
+    // Fallback to legacy automatic token generation
+    const response = NextResponse.next();
     const newToken = generateOSSToken();
     const user = {
       id: newToken,
@@ -29,7 +40,6 @@ export function middleware(request: NextRequest) {
       organizationId: `org_${newToken}`,
     };
 
-    // Set cookies in the response (httpOnly for security)
     response.cookies.set(OSS_TOKEN_COOKIE, newToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -45,9 +55,10 @@ export function middleware(request: NextRequest) {
       maxAge: 60 * 60 * 24 * 30, // 30 days
       path: '/',
     });
+    return response;
   }
 
-  return response;
+  return NextResponse.next();
 }
 
 // Configure which routes the middleware runs on

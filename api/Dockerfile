@@ -7,6 +7,8 @@ WORKDIR /app
 # Install git in builder stage (needed for pip install from git)
 RUN apt-get update && apt-get install -y \
     git \
+    build-essential \
+    libffi-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -29,7 +31,7 @@ RUN pip install --user --no-cache-dir '/tmp/pipecat[cartesia,deepgram,openai,ele
     # Clean up pip cache and temporary pipecat directory
     rm -rf /root/.cache/pip /tmp/pipecat
 
-    
+
 # Remove unnecessary Python cache files from installed packages
 RUN find /root/.local -type f -name '*.pyc' -delete && \
     find /root/.local -type d -name '__pycache__' -delete && \

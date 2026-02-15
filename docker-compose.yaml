@@ -15,7 +15,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 3s
       timeout: 3s
       retries: 10
@@ -31,7 +31,7 @@ services:
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "redissecret", "ping"]
+      test: [ "CMD", "redis-cli", "-a", "redissecret", "ping" ]
       interval: 3s
       timeout: 10s
       retries: 10
@@ -52,7 +52,7 @@ services:
     volumes:
       - minio-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -62,7 +62,7 @@ services:
   nginx:
     image: nginx:alpine
     container_name: nginx_https
-    profiles: ["remote"]
+    profiles: [ "remote" ]
     depends_on:
       - ui
     ports:
@@ -75,6 +75,9 @@ services:
       - app-network
 
   api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
     image: ${REGISTRY:-dograhai}/dograh-api:latest
     volumes:
       - shared-tmp:/tmp
@@ -130,11 +133,7 @@ services:
       cloudflared:
         condition: service_started
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8000/api/v1/health'').read()"',
-        ]
+      test: [ "CMD-SHELL", 'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8000/api/v1/health'').read()"' ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -143,11 +142,15 @@ services:
       - app-network
 
   ui:
+    build:
+      context: .
+      dockerfile: ui/Dockerfile
     image: ${REGISTRY:-dograhai}/dograh-ui:latest
     environment:
       # Server-side URL (SSR, internal Docker network)
       BACKEND_URL: "http://api:8000"
       NODE_ENV: "oss"
+      NEXT_PUBLIC_LOCAL_AUTH_ENABLED: "true"
 
       # Flag to enable/ disable posthog and sentry
       ENABLE_TELEMETRY: "${ENABLE_TELEMETRY:-true}"
@@ -164,11 +167,7 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "wget --no-verbose --tries=1 --spider http://localhost:3010 || exit 1",
-        ]
+      test: [ "CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3010 || exit 1" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -189,7 +188,7 @@ services:
     image: coturn/coturn:4.8.0
     container_name: coturn
     restart: unless-stopped
-    profiles: ["remote"]
+    profiles: [ "remote" ]
     ports:
       - "3478:3478/udp"
       - "3478:3478/tcp"
