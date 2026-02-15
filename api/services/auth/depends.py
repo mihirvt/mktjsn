@@ -10,6 +10,7 @@ from api.db import db_client
 from api.db.models import UserModel
 from api.schemas.user_configuration import UserConfiguration
 from api.services.auth.stack_auth import stackauth
+from api.services.auth.local_auth import decode_access_token
 from api.services.configuration.registry import ServiceProviders
 
 
@@ -27,6 +28,12 @@ async def get_user(
     # Check if we're in OSS deployment mode
     # ------------------------------------------------------------------
     if DEPLOYMENT_MODE == "oss":
+        # First try to handle as a local JWT auth
+        local_user = await _handle_local_jwt_auth(authorization)
+        if local_user:
+            return local_user
+        
+        # Fallback to no-auth OSS mode (old behavior)
         return await _handle_oss_auth(authorization)
 
     # ------------------------------------------------------------------
@@ -184,6 +191,28 @@ async def _handle_oss_auth(authorization: str | None) -> UserModel:
         raise HTTPException(
             status_code=500, detail=f"Error while handling OSS authentication: {e}"
         )
+
+
+async def _handle_local_jwt_auth(authorization: str | None) -> UserModel | None:
+    """
+    Handle local JWT authentication.
+    Returns the user if token is valid, None otherwise.
+    """
+    if not authorization:
+        return None
+
+    token = (
+        authorization.replace("Bearer ", "")
+        if authorization.startswith("Bearer ")
+        else authorization
+    )
+
+    payload = decode_access_token(token)
+    if not payload or "user_id" not in payload:
+        return None
+
+    user = await db_client.get_user_by_id(payload["user_id"])
+    return user
 
 
 async def _handle_api_key_auth(api_key: str) -> UserModel:

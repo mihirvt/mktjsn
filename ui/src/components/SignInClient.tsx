@@ -4,6 +4,7 @@ import { Loader2 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 
 import Footer from './Footer';
+import { LocalSignInForm } from './auth/LocalSignInForm';
 
 // Only load Stack's SignIn component when Stack provider is active
 const SignIn = dynamic(
@@ -16,11 +17,8 @@ export default function SignInClient() {
 
   if (authProvider !== 'stack') {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold mb-4">Local Authentication</h1>
-          <p className="text-gray-600">Local authentication is enabled. No sign-in required.</p>
-        </div>
+      <div className="flex min-h-screen items-center justify-center p-4">
+        <LocalSignInForm />
         <Footer />
       </div>
     );

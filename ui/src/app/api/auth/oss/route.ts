@@ -24,8 +24,12 @@ export async function GET() {
   let token = cookieStore.get(OSS_TOKEN_COOKIE)?.value;
   let user = cookieStore.get(OSS_USER_COOKIE)?.value;
 
-  // If no token exists, create one
+  // If no token exists, create one ONLY if local auth is not required
   if (!token) {
+    if (process.env.NEXT_PUBLIC_LOCAL_AUTH_ENABLED === 'true') {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
     token = generateOSSToken();
     user = JSON.stringify({
       id: token,

@@ -68,6 +68,8 @@ class UserModel(Base):
         secondary=organization_users_association,
         back_populates="users",
     )
+    email = Column(String, unique=True, index=True, nullable=True)
+    hashed_password = Column(String, nullable=True)
     is_superuser = Column(Boolean, default=False)
 
 

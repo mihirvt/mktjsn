@@ -49,6 +49,31 @@ class UserClient(BaseDBClient):
                     raise ValueError(error_msg)
         return user
 
+    async def get_user_by_email(self, email: str) -> UserModel | None:
+        """Fetch a user by their email."""
+        async with self.async_session() as session:
+            result = await session.execute(
+                select(UserModel).where(UserModel.email == email)
+            )
+            return result.scalars().first()
+
+    async def create_local_user(self, email: str, hashed_password: str) -> UserModel:
+        """Create a new local user with email and hashed password."""
+        async with self.async_session() as session:
+            import uuid
+            provider_id = f"local_{uuid.uuid4()}"
+            user = UserModel(
+                email=email,
+                hashed_password=hashed_password,
+                provider_id=provider_id,
+                created_at=datetime.now(timezone.utc),
+                is_superuser=False
+            )
+            session.add(user)
+            await session.commit()
+            await session.refresh(user)
+            return user
+
     async def get_user_by_id(self, user_id: int) -> UserModel | None:
         """Fetch a user by their internal ID."""
         async with self.async_session() as session:
