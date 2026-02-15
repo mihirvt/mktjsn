@@ -1,0 +1,12 @@
+# Nixpacks configuration to point to the UI folder
+[phases.setup]
+nixPkgs = ["nodejs_22"]
+
+[phases.install]
+cmds = ["cd ui && npm install --legacy-peer-deps"]
+
+[phases.build]
+cmds = ["cd ui && npm run build"]
+
+[start]
+cmd = "cd ui && npm run start"
