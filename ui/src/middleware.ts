@@ -9,7 +9,9 @@ function generateOSSToken(): string {
 }
 
 export function middleware(request: NextRequest) {
+  console.log('[Middleware] Running for:', request.nextUrl.pathname);
   const authProvider = process.env.NEXT_PUBLIC_AUTH_PROVIDER || 'stack';
+  console.log('[Middleware] Auth Provider:', authProvider);
 
   // Only handle OSS mode
   if (authProvider !== 'local') {
