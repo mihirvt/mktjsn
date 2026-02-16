@@ -12,4 +12,4 @@ cmds = ["cd ui && npm run build"]
 cmd = "cd ui && npm run start"
 
 [variables]
-BACKEND_URL = "http://q8gwg4co8084cko8ss4kwo04.168.231.103.94.sslip.io"
+BACKEND_URL = "https://base-api.muktam.online"

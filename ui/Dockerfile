@@ -40,7 +40,7 @@ ENV NEXT_PUBLIC_NODE_ENV="oss"
 ENV NEXT_PUBLIC_AUTH_PROVIDER="local"
 ENV NEXT_PUBLIC_DEPLOYMENT_MODE="oss"
 ENV NEXT_PUBLIC_LOCAL_AUTH_ENABLED="true"
-ENV BACKEND_URL="http://q8gwg4co8084cko8ss4kwo04.168.231.103.94.sslip.io"
+ENV BACKEND_URL="https://base-api.muktam.online"
 ENV NEXT_TELEMETRY_DISABLED="1"
 ENV NEXT_PUBLIC_CHATWOOT_URL="https://chat.dograh.com"
 ENV NEXT_PUBLIC_CHATWOOT_TOKEN="3fkFx2mCEjNHjM9gaNc4A82X"
@@ -57,7 +57,7 @@ WORKDIR /app
 
 # Environment variables will be provided by docker-compose or Coolify
 ENV NODE_ENV=production
-ENV BACKEND_URL="http://q8gwg4co8084cko8ss4kwo04.168.231.103.94.sslip.io"
+ENV BACKEND_URL="https://base-api.muktam.online"
 
 # Create a non-root user
 RUN addgroup --system --gid 1001 nodejs && \
