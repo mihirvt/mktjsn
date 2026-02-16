@@ -16,6 +16,6 @@ msgpack==1.1.2
 docling[rapidocr]==2.68.0
 pgvector==0.4.2
 passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
 PyJWT==2.10.1
 email-validator==2.1.0
-email-validator
