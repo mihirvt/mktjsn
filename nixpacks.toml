@@ -10,3 +10,6 @@ cmds = ["cd ui && npm run build"]
 
 [start]
 cmd = "cd ui && npm run start"
+
+[variables]
+BACKEND_URL = "http://q8gwg4co8084cko8ss4kwo04.168.231.103.94.sslip.io"
