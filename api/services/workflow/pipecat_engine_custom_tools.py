@@ -295,7 +295,10 @@ class CustomToolManager:
                 workflow_run = await db_client.get_workflow_run_by_id(
                     self._engine._workflow_run_id
                 )
-                if workflow_run.mode in [WorkflowRunMode.WEBRTC.value, WorkflowRunMode.SMALLWEBRTC.value]:
+                if workflow_run.mode in [
+                    WorkflowRunMode.WEBRTC.value,
+                    WorkflowRunMode.SMALLWEBRTC.value,
+                ]:
                     webrtc_error_result = {
                         "status": "failed",
                         "message": "I'm sorry, but call transfers are not available for web calls. Please try a telephony call.",
