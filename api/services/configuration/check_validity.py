@@ -46,10 +46,10 @@ class UserConfigurationValidator:
     async def validate(self, configuration: UserConfiguration) -> APIKeyStatusResponse:
         status_list = []
 
-        status_list.extend(self._validate_service(configuration.llm, "llm"))
-        status_list.extend(self._validate_service(configuration.stt, "stt"))
-        status_list.extend(self._validate_service(configuration.tts, "tts"))
-        # Embeddings is optional - only validate if configured
+        # All services are optional - only validate if configured
+        status_list.extend(self._validate_service(configuration.llm, "llm", required=False))
+        status_list.extend(self._validate_service(configuration.stt, "stt", required=False))
+        status_list.extend(self._validate_service(configuration.tts, "tts", required=False))
         status_list.extend(
             self._validate_service(
                 configuration.embeddings, "embeddings", required=False

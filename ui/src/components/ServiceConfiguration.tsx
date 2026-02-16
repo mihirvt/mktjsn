@@ -364,21 +364,26 @@ export default function ServiceConfiguration() {
             }
         });
 
-        // Build save config - only include embeddings if api_key is provided
-        const saveConfig: {
-            llm: Record<string, string | number>;
-            tts: Record<string, string | number>;
-            stt: Record<string, string | number>;
-            embeddings?: Record<string, string | number>;
-        } = {
-            llm: userConfig.llm,
-            tts: userConfig.tts,
-            stt: userConfig.stt
-        };
+        // Build save config - only include services that have an api_key provided
+        const saveConfig: Record<string, Record<string, string | number>> = {};
 
-        // Only include embeddings if user has configured it (has api_key)
+        if (userConfig.llm.api_key) {
+            saveConfig.llm = userConfig.llm;
+        }
+        if (userConfig.tts.api_key) {
+            saveConfig.tts = userConfig.tts;
+        }
+        if (userConfig.stt.api_key) {
+            saveConfig.stt = userConfig.stt;
+        }
         if (userConfig.embeddings.api_key) {
             saveConfig.embeddings = userConfig.embeddings;
+        }
+
+        if (Object.keys(saveConfig).length === 0) {
+            setApiError('Please fill in at least one API key to save.');
+            setIsSaving(false);
+            return;
         }
 
         try {
@@ -466,10 +471,7 @@ export default function ServiceConfiguration() {
                         <Input
                             type="text"
                             placeholder="Enter API key"
-                            {...register(`${service}_api_key`, {
-                                // Embeddings is optional, so don't require its api_key
-                                required: service !== "embeddings" && providerSchema.required?.includes("api_key"),
-                            })}
+                            {...register(`${service}_api_key`)}
                         />
                         {errors[`${service}_api_key`] && (
                             <p className="text-sm text-red-500">
