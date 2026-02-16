@@ -62,7 +62,7 @@ export async function POST(request: Request) {
                 path: '/',
             });
 
-            return NextResponse.json({ success: true, user });
+            return NextResponse.json({ success: true, token, user });
         }
 
         const errorData = await response.json();
