@@ -1,9 +1,11 @@
 import json
 import uuid
+import copy
 from datetime import datetime
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+import httpx
 from httpx import HTTPStatusError
 from loguru import logger
 from pydantic import BaseModel, ValidationError
@@ -19,6 +21,119 @@ from api.services.mps_service_key_client import mps_service_key_client
 from api.services.workflow.dto import ReactFlowDTO
 from api.services.workflow.errors import ItemKind, WorkflowError
 from api.services.workflow.workflow import WorkflowGraph
+from api.services.gen_ai.json_parser import parse_llm_json
+
+
+async def _generate_workflow_locally(request, user: UserModel) -> dict:
+    """Generate a workflow JSON using the user's configured LLM."""
+    
+    # 1. Get User LLM Config
+    user_config = await db_client.get_user_configurations(user.id)
+    if not user_config or not user_config.llm or not user_config.llm.api_key:
+         logger.warning("No LLM configuration found for local generation.")
+         return None
+
+    llm_config = user_config.llm
+    provider = llm_config.provider
+    api_key = llm_config.api_key
+    model = llm_config.model or "gpt-4o"
+
+    # 2. Prepare Prompt
+    system_prompt = """You are an expert voice agent designer. Create a JSON workflow based on the user's request.
+    
+    The JSON structure must strictly follow this schema:
+    {
+      "nodes": [
+        {
+          "id": "trigger_1",
+          "type": "trigger", 
+          "position": {"x": 100, "y": 100},
+          "data": { "label": "Start Call", "trigger_path": "<UUID>", "type": "inbound" }
+        },
+        {
+          "id": "node_2",
+          "type": "agentNode",
+          "position": {"x": 100, "y": 300},
+          "data": {
+            "name": "Greeting",
+            "prompt": "Say hello to the user.",
+            "is_start": true,
+            "wait_for_user_response": true
+          }
+        }
+      ],
+      "edges": [
+        { "id": "e1-2", "source": "trigger_1", "target": "node_2", "data": { "label": "Start", "condition": "" } }
+      ]
+    }
+
+    Rules:
+    1. Always start with a 'trigger' node.
+    2. Connect trigger to an 'agentNode' with is_start=true.
+    3. Use 'agentNode' for speaking/listening.
+    4. Use 'endNode' or 'hangup' to end the call.
+    5. 'nodes' and 'edges' lists are required.
+    6. Ensure all node IDs are unique strings.
+    7. 'trigger_path' in trigger node should be a UUID.
+    """
+
+    user_prompt = f"Use Case: {request.use_case}\nDescription: {request.activity_description}\nCall Type: {request.call_type}"
+
+    # 3. Call LLM API (Generic OpenAI-compatible)
+    base_url = None
+    if provider == "openai":
+        base_url = "https://api.openai.com/v1"
+    elif provider == "groq":
+        base_url = "https://api.groq.com/openai/v1"
+    elif provider == "openrouter":
+        base_url = "https://openrouter.ai/api/v1"
+    elif provider == "deepseek":
+        base_url = "https://api.deepseek.com/v1"
+    
+    if not base_url:
+        logger.warning(f"Provider {provider} not supported for local generation.")
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "temperature": 0.7,
+                    "response_format": {"type": "json_object"}
+                }
+            )
+            
+            if response.status_code != 200:
+                logger.error(f"LLM API Error: {response.text}")
+                return None
+                
+            result = response.json()
+            content = result["choices"][0]["message"]["content"]
+            
+            # 4. Parse JSON
+            workflow_def = parse_llm_json(content)
+            
+            if not workflow_def or "nodes" not in workflow_def:
+                return None
+
+            return {
+                "name": request.use_case,
+                "workflow_definition": workflow_def
+            }
+
+    except Exception as e:
+        logger.error(f"Local workflow generation failed: {e}")
+        return None
 
 
 def extract_trigger_paths(workflow_definition: dict) -> List[str]:
@@ -324,52 +439,115 @@ async def create_workflow_from_template(
                 organization_id=user.selected_organization_id,
             )
 
-        # Create the workflow in our database
-        # Regenerate trigger UUIDs to avoid conflicts with existing triggers
-        workflow_def = regenerate_trigger_uuids(
-            workflow_data.get("workflow_definition", {})
-        )
-        workflow = await db_client.create_workflow(
-            name=workflow_data.get("name", f"{request.use_case} - {request.call_type}"),
-            workflow_definition=workflow_def,
-            user_id=user.id,
-            organization_id=user.selected_organization_id,
-        )
-
-        # Sync agent triggers if workflow definition contains any
-        if workflow_def:
-            trigger_paths = extract_trigger_paths(workflow_def)
-            if trigger_paths:
-                await db_client.sync_triggers_for_workflow(
-                    workflow_id=workflow.id,
-                    organization_id=user.selected_organization_id,
-                    trigger_paths=trigger_paths,
-                )
-
-        return {
-            "id": workflow.id,
-            "name": workflow.name,
-            "status": workflow.status,
-            "created_at": workflow.created_at,
-            "workflow_definition": workflow.workflow_definition_with_fallback,
-            "current_definition_id": workflow.current_definition_id,
-            "template_context_variables": workflow.template_context_variables,
-            "call_disposition_codes": workflow.call_disposition_codes,
-            "workflow_configurations": workflow.workflow_configurations,
-        }
-
     except HTTPStatusError as e:
-        logger.error(f"MPS API error: {e}")
-        raise HTTPException(
-            status_code=e.response.status_code if hasattr(e, "response") else 500,
-            detail=str(e),
-        )
+        if e.response.status_code in [401, 403]:
+            # Fallback for local users without creating a service key:
+            logger.warning(f"MPS API unauthorized ({e.response.status_code}), attempting local generation")
+            
+            # 1. Try to generate using local LLM
+            workflow_data = await _generate_workflow_locally(request, user)
+            
+            if not workflow_data:
+                # 2. If local generation fails (no key or error), fallback to basic hardcoded workflow
+                logger.warning("Local generation failed or not configured, falling back to basic workflow")
+                trigger_uuid = str(uuid.uuid4())
+                workflow_data = {
+                    "name": f"{request.use_case}",
+                    "workflow_definition": {
+                        "nodes": [
+                            {
+                                "id": "trigger_1",
+                                "type": "trigger",
+                                "position": {"x": 250, "y": 50},
+                                "data": {
+                                    "label": "Start", 
+                                    "trigger_path": trigger_uuid,
+                                    "type": request.call_type
+                                }
+                            },
+                            {
+                                "id": "llm_1",
+                                "type": "llm",
+                                "position": {"x": 250, "y": 200},
+                                "data": {
+                                    "label": "AI Assistant",
+                                    "system_prompt": request.activity_description or "You are a helpful assistant.",
+                                    "model": "gpt-4o",
+                                }
+                            },
+                            {
+                                "id": "hangup_1",
+                                "type": "hangup",
+                                "position": {"x": 250, "y": 400},
+                                "data": {"label": "End Call"}
+                            }
+                        ],
+                        "edges": [
+                            {
+                                "id": "e1-2",
+                                "source": "trigger_1",
+                                "target": "llm_1",
+                                "sourceHandle": "output",
+                                "targetHandle": "input"
+                            },
+                            {
+                                "id": "e2-3",
+                                "source": "llm_1",
+                                "target": "hangup_1",
+                                "sourceHandle": "output",
+                                "targetHandle": "input"
+                            }
+                        ]
+                    }
+                }
+        else:
+            logger.error(f"MPS API error: {e}")
+            raise HTTPException(
+                status_code=e.response.status_code if hasattr(e, "response") else 500,
+                detail=str(e),
+            )
+            
     except Exception as e:
         logger.error(f"Unexpected error creating workflow from template: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"An unexpected error occurred: {str(e)}",
         )
+
+    # Create the workflow in our database
+    # Regenerate trigger UUIDs to avoid conflicts with existing triggers (if any)
+    workflow_def = regenerate_trigger_uuids(
+        workflow_data.get("workflow_definition", {})
+    )
+    
+    workflow = await db_client.create_workflow(
+        name=workflow_data.get("name", f"{request.use_case}"),
+        workflow_definition=workflow_def,
+        user_id=user.id,
+        organization_id=user.selected_organization_id,
+    )
+
+    # Sync agent triggers if workflow definition contains any
+    if workflow_def:
+        trigger_paths = extract_trigger_paths(workflow_def)
+        if trigger_paths:
+            await db_client.sync_triggers_for_workflow(
+                workflow_id=workflow.id,
+                organization_id=user.selected_organization_id,
+                trigger_paths=trigger_paths,
+            )
+
+    return {
+        "id": workflow.id,
+        "name": workflow.name,
+        "status": workflow.status,
+        "created_at": workflow.created_at,
+        "workflow_definition": workflow.workflow_definition_with_fallback,
+        "current_definition_id": workflow.current_definition_id,
+        "template_context_variables": workflow.template_context_variables,
+        "call_disposition_codes": workflow.call_disposition_codes,
+        "workflow_configurations": workflow.workflow_configurations,
+    }
 
 
 class WorkflowSummaryResponse(BaseModel):
