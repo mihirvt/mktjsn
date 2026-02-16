@@ -145,10 +145,12 @@ async def get_turn_credentials(
         TurnCredentialsResponse with username, password, ttl, and TURN URIs
     """
     if not TURN_SECRET:
-        logger.warning("TURN credentials requested but TURN_SECRET not configured")
-        raise HTTPException(
-            status_code=503,
-            detail="TURN server not configured",
+        logger.warning("TURN credentials requested but TURN_SECRET not configured. Returning empty config to allow STUN fallback.")
+        return TurnCredentialsResponse(
+            username="",
+            password="",
+            ttl=0,
+            uris=[]
         )
 
     try:

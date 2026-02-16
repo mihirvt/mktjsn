@@ -32,6 +32,12 @@ async def get_user(
         local_user = await _handle_local_jwt_auth(authorization)
         if local_user:
             return local_user
+
+        # If it looks like a JWT but failed validation, reject it
+        token = authorization.replace("Bearer ", "") if authorization else ""
+        if token and token.strip().startswith("ey"):
+            logger.warning("Invalid or expired JWT provided in OSS mode. Denying access to prevent ghost user creation.")
+            raise HTTPException(status_code=401, detail="Invalid authentication token")
         
         # Fallback to no-auth OSS mode (old behavior)
         return await _handle_oss_auth(authorization)
@@ -230,6 +236,7 @@ async def _handle_local_jwt_auth(authorization: Optional[str]) -> Optional[UserM
         )
         user.selected_organization_id = organization.id
 
+    logger.debug(f"Local JWT Auth User: {user.id}, Org: {user.selected_organization_id}")
     return user
 
 
