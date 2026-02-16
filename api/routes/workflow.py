@@ -104,6 +104,7 @@ async def _generate_workflow_locally(request, user: UserModel) -> dict:
     9. Ensure all node IDs are unique strings.
     10. 'trigger_path' in trigger node should be a UUID.
     11. For 'agentNode', 'prompt' field in data is REQUIRED.
+    12. Ensure agent responses are complete sentences and DO NOT output standalone punctuation marks (like '.' or '..') as this crashes the TTS engine.
     """
 
     user_prompt = f"Use Case: {request.use_case}\nDescription: {request.activity_description}\nCall Type: {request.call_type}"
