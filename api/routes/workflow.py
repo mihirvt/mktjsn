@@ -48,7 +48,7 @@ async def _generate_workflow_locally(request, user: UserModel) -> dict:
           "id": "trigger_1",
           "type": "trigger", 
           "position": {"x": 100, "y": 100},
-          "data": { "label": "Start Call", "trigger_path": "<UUID>", "type": "inbound" }
+          "data": { "name": "Start Call", "trigger_path": "<UUID>", "type": "inbound" }
         },
         {
           "id": "node_2",
@@ -60,21 +60,42 @@ async def _generate_workflow_locally(request, user: UserModel) -> dict:
             "is_start": true,
             "wait_for_user_response": true
           }
+        },
+        {
+            "id": "node_3",
+            "type": "endCall",
+            "position": { "x": 100, "y": 500 },
+            "data": { "name": "End Call" }
         }
       ],
       "edges": [
-        { "id": "e1-2", "source": "trigger_1", "target": "node_2", "data": { "label": "Start", "condition": "" } }
+        { 
+            "id": "e1-2", 
+            "source": "trigger_1", 
+            "target": "node_2", 
+            "data": { "label": "Start", "condition": "always" } 
+        },
+        {
+            "id": "e2-3",
+            "source": "node_2",
+            "target": "node_3",
+            "data": { "label": "End", "condition": "always" }
+        }
       ]
     }
 
     Rules:
-    1. Always start with a 'trigger' node.
-    2. Connect trigger to an 'agentNode' with is_start=true.
-    3. Use 'agentNode' for speaking/listening.
-    4. Use 'endNode' or 'hangup' to end the call.
-    5. 'nodes' and 'edges' lists are required.
-    6. Ensure all node IDs are unique strings.
-    7. 'trigger_path' in trigger node should be a UUID.
+    1. Node 'type' MUST be one of: 'trigger', 'agentNode', 'startCall', 'endCall', 'webhook'.
+    2. Node 'data' MUST have a 'name' field string (min length 1). DO NOT use 'label'.
+    3. Edge 'data' MUST have 'label' AND 'condition' fields (strings, min length 1).
+    4. Always start with a 'trigger' node.
+    5. Connect trigger to an 'agentNode' or 'startCall'.
+    6. Use 'agentNode' for speaking/listening with the user.
+    7. Use 'endCall' to hang up.
+    8. 'nodes' and 'edges' lists are required.
+    9. Ensure all node IDs are unique strings.
+    10. 'trigger_path' in trigger node should be a UUID.
+    11. For 'agentNode', 'prompt' field in data is REQUIRED.
     """
 
     user_prompt = f"Use Case: {request.use_case}\nDescription: {request.activity_description}\nCall Type: {request.call_type}"
@@ -134,6 +155,7 @@ async def _generate_workflow_locally(request, user: UserModel) -> dict:
     except Exception as e:
         logger.error(f"Local workflow generation failed: {e}")
         return None
+
 
 
 def extract_trigger_paths(workflow_definition: dict) -> List[str]:
@@ -460,26 +482,27 @@ async def create_workflow_from_template(
                                 "type": "trigger",
                                 "position": {"x": 250, "y": 50},
                                 "data": {
-                                    "label": "Start", 
+                                    "name": "Start Call", 
                                     "trigger_path": trigger_uuid,
                                     "type": request.call_type
                                 }
                             },
                             {
                                 "id": "llm_1",
-                                "type": "llm",
+                                "type": "agentNode",
                                 "position": {"x": 250, "y": 200},
                                 "data": {
-                                    "label": "AI Assistant",
-                                    "system_prompt": request.activity_description or "You are a helpful assistant.",
-                                    "model": "gpt-4o",
+                                    "name": "AI Assistant",
+                                    "prompt": request.activity_description or "You are a helpful assistant.",
+                                    "is_start": True,
+                                    "wait_for_user_response": True
                                 }
                             },
                             {
                                 "id": "hangup_1",
-                                "type": "hangup",
+                                "type": "endCall",
                                 "position": {"x": 250, "y": 400},
-                                "data": {"label": "End Call"}
+                                "data": {"name": "End Call"}
                             }
                         ],
                         "edges": [
@@ -488,14 +511,16 @@ async def create_workflow_from_template(
                                 "source": "trigger_1",
                                 "target": "llm_1",
                                 "sourceHandle": "output",
-                                "targetHandle": "input"
+                                "targetHandle": "input",
+                                "data": {"label": "Start", "condition": "always"}
                             },
                             {
                                 "id": "e2-3",
                                 "source": "llm_1",
                                 "target": "hangup_1",
                                 "sourceHandle": "output",
-                                "targetHandle": "input"
+                                "targetHandle": "input",
+                                "data": {"label": "End", "condition": "always"}
                             }
                         ]
                     }
