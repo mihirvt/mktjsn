@@ -39,56 +39,64 @@ async def _generate_workflow_locally(request, user: UserModel) -> dict:
     model = llm_config.model or "gpt-4o"
 
     # 2. Prepare Prompt
-    system_prompt = """You are an expert voice agent designer. Create a JSON workflow based on the user's request.
+    role_instruction = "You are an expert voice agent designer."
+    if request.call_type.lower() == "inbound":
+        role_instruction += " This is an INBOUND agent. The user calls in. The agent must start with a greeting (agentNode with is_start=true)."
+        trigger_type = "inbound"
+    else:
+        role_instruction += " This is an OUTBOUND agent. The agent calls the user. The agent must start with the reason for calling (agentNode with is_start=true)."
+        trigger_type = "outbound"
+
+    system_prompt = f"""{role_instruction} Create a JSON workflow based on the user's request.
     
     The JSON structure must strictly follow this schema:
-    {
+    {{
       "nodes": [
-        {
+        {{
           "id": "trigger_1",
           "type": "trigger", 
-          "position": {"x": 100, "y": 100},
-          "data": { "name": "Start Call", "trigger_path": "<UUID>", "type": "inbound" }
-        },
-        {
+          "position": {{"x": 100, "y": 100}},
+          "data": {{ "name": "Start Call", "trigger_path": "<UUID>", "type": "{trigger_type}" }}
+        }},
+        {{
           "id": "node_2",
           "type": "agentNode",
-          "position": {"x": 100, "y": 300},
-          "data": {
+          "position": {{"x": 100, "y": 300}},
+          "data": {{
             "name": "Greeting",
             "prompt": "Say hello to the user.",
             "is_start": true,
             "wait_for_user_response": true
-          }
-        },
-        {
+          }}
+        }},
+        {{
             "id": "node_3",
             "type": "endCall",
-            "position": { "x": 100, "y": 500 },
-            "data": { "name": "End Call" }
-        }
+            "position": {{ "x": 100, "y": 500 }},
+            "data": {{ "name": "End Call" }}
+        }}
       ],
       "edges": [
-        { 
+        {{ 
             "id": "e1-2", 
             "source": "trigger_1", 
             "target": "node_2", 
-            "data": { "label": "Start", "condition": "always" } 
-        },
-        {
+            "data": {{ "label": "Start", "condition": "always" }} 
+        }},
+        {{
             "id": "e2-3",
             "source": "node_2",
             "target": "node_3",
-            "data": { "label": "End", "condition": "always" }
-        }
+            "data": {{ "label": "End", "condition": "always" }}
+        }}
       ]
-    }
+    }}
 
     Rules:
     1. Node 'type' MUST be one of: 'trigger', 'agentNode', 'startCall', 'endCall', 'webhook'.
     2. Node 'data' MUST have a 'name' field string (min length 1). DO NOT use 'label'.
     3. Edge 'data' MUST have 'label' AND 'condition' fields (strings, min length 1).
-    4. Always start with a 'trigger' node.
+    4. Always start with a 'trigger' node with type='{trigger_type}'.
     5. Connect trigger to an 'agentNode' or 'startCall'.
     6. Use 'agentNode' for speaking/listening with the user.
     7. Use 'endCall' to hang up.
