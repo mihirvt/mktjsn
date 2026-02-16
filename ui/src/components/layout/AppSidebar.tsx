@@ -8,6 +8,7 @@ import {
   CircleDollarSign,
   Database,
   FileText,
+  LogOut,
   HelpCircle,
   Home,
   Key,
@@ -66,7 +67,7 @@ export function AppSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { state } = useSidebar();
-  const { provider, getSelectedTeam } = useAuth();
+  const { provider, getSelectedTeam, logout } = useAuth();
   const { config } = useAppConfig();
 
   // Get selected team for Stack auth (cast to Team type from Stack)
@@ -90,52 +91,52 @@ export function AppSidebar() {
   ];
 
   const buildSection = [
-        {
-          title: "Voice Agents",
-          url: "/workflow",
-          icon: Workflow,
-        },
-        {
-          title: "Campaigns",
-          url: "/campaigns",
-          icon: Megaphone,
-        },
-        {
-          title: "Automation",
-          url: "/automation",
-          icon: Zap,
-        },
-        {
-          title: "Models",
-          url: "/model-configurations",
-          icon: Brain,
-        },
-        {
-          title: "Telephony",
-          url: "/telephony-configurations",
-          icon: Phone,
-        },
-        {
-          title: "Tools",
-          url: "/tools",
-          icon: Wrench,
-        },
-        {
-          title: "Files",
-          url: "/files",
-          icon: Database,
-        },
-        // {
-        //   title: "Integrations",
-        //   url: "/integrations",
-        //   icon: Plug,
-        // },
-        {
-          title: "Developers",
-          url: "/api-keys",
-          icon: Key,
-        },
-      ];
+    {
+      title: "Voice Agents",
+      url: "/workflow",
+      icon: Workflow,
+    },
+    {
+      title: "Campaigns",
+      url: "/campaigns",
+      icon: Megaphone,
+    },
+    {
+      title: "Automation",
+      url: "/automation",
+      icon: Zap,
+    },
+    {
+      title: "Models",
+      url: "/model-configurations",
+      icon: Brain,
+    },
+    {
+      title: "Telephony",
+      url: "/telephony-configurations",
+      icon: Phone,
+    },
+    {
+      title: "Tools",
+      url: "/tools",
+      icon: Wrench,
+    },
+    {
+      title: "Files",
+      url: "/files",
+      icon: Database,
+    },
+    // {
+    //   title: "Integrations",
+    //   url: "/integrations",
+    //   icon: Plug,
+    // },
+    {
+      title: "Developers",
+      url: "/api-keys",
+      icon: Key,
+    },
+  ];
 
   const observeSection = [
     {
@@ -395,6 +396,47 @@ export function AppSidebar() {
                     <HelpCircle className="h-4 w-4" />
                     <span className="ml-2">Get Help</span>
                   </a>
+                </Button>
+              )}
+            </>
+          )}
+
+          {/* Logout Button for Local Auth */}
+          {provider !== "stack" && (
+            <>
+              {state === "collapsed" ? (
+                <TooltipProvider delayDuration={0}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="w-full hover:bg-destructive/10 hover:text-destructive"
+                        onClick={async () => {
+                          await logout();
+                          router.push('/sign-in');
+                        }}
+                      >
+                        <LogOut className="h-4 w-4" />
+                        <span className="sr-only">Logout</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">
+                      <p>Logout</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : (
+                <Button
+                  variant="ghost"
+                  className="w-full justify-start hover:bg-destructive/10 hover:text-destructive"
+                  onClick={async () => {
+                    await logout();
+                    router.push('/sign-in');
+                  }}
+                >
+                  <LogOut className="h-4 w-4" />
+                  <span className="ml-2">Logout</span>
                 </Button>
               )}
             </>

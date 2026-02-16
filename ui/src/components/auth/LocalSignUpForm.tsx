@@ -31,7 +31,7 @@ export function LocalSignUpForm() {
             const success = await authService.register(email, password);
             if (success) {
                 toast.success('Account created successfully');
-                router.push('/dashboard');
+                router.push('/after-sign-in');
                 router.refresh();
             } else {
                 toast.error('Registration failed. Email might already be in use.');

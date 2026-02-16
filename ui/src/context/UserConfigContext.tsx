@@ -141,13 +141,20 @@ export function UserConfigProvider({ children }: { children: ReactNode }) {
     }, [auth.loading, auth.isAuthenticated]);
 
     const saveUserConfig = useCallback(async (userConfigRequest: SaveUserConfigFunctionParams) => {
-        if (!accessToken) throw new Error('No authentication token available');
+        // Always get a fresh token from the auth service
+        const currentAuth = authRef.current;
+        let token = accessToken;
+        if (!token) {
+            token = await currentAuth.getAccessToken();
+            if (token) setAccessToken(token);
+        }
+        if (!token) throw new Error('No authentication token available. Please log in again.');
         const response = await updateUserConfigurationsApiV1UserConfigurationsUserPut({
             body: {
                 ...userConfig,
                 ...userConfigRequest
             } as UserConfigurationRequestResponseSchema,
-            headers: { 'Authorization': `Bearer ${accessToken}` },
+            headers: { 'Authorization': `Bearer ${token}` },
         });
         if (response.error) {
             let msg = 'Failed to save user configuration';

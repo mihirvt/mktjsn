@@ -102,6 +102,12 @@ export class LocalAuthService implements IAuthService {
 
     await this.ensureAuth();
 
+    // If token is still null, try re-initializing (e.g., after login set cookies)
+    if (!this.currentToken) {
+      this.authPromise = this.initializeAuth();
+      await this.authPromise;
+    }
+
     if (!this.currentToken) {
       logger.warn('No OSS token available after initialization');
       return '';

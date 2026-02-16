@@ -26,7 +26,7 @@ export function LocalSignInForm() {
             const success = await authService.login(email, password);
             if (success) {
                 toast.success('Logged in successfully');
-                router.push('/dashboard'); // or wherever the home page is
+                router.push('/after-sign-in');
                 router.refresh();
             } else {
                 toast.error('Invalid email or password');

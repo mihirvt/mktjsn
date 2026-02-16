@@ -193,10 +193,11 @@ async def _handle_oss_auth(authorization: str | None) -> UserModel:
         )
 
 
-async def _handle_local_jwt_auth(authorization: str | None) -> UserModel | None:
+async def _handle_local_jwt_auth(authorization: Optional[str]) -> Optional[UserModel]:
     """
     Handle local JWT authentication.
     Returns the user if token is valid, None otherwise.
+    Also ensures the user has an organization assigned.
     """
     if not authorization:
         return None
@@ -212,6 +213,23 @@ async def _handle_local_jwt_auth(authorization: str | None) -> UserModel | None:
         return None
 
     user = await db_client.get_user_by_id(payload["user_id"])
+    if not user:
+        return None
+
+    # Ensure user has an organization (create if needed)
+    if not user.selected_organization_id:
+        (
+            organization,
+            org_was_created,
+        ) = await db_client.get_or_create_organization_by_provider_id(
+            org_provider_id=f"org_local_{user.id}", user_id=user.id
+        )
+        await db_client.add_user_to_organization(user.id, organization.id)
+        await db_client.update_user_selected_organization(
+            user.id, organization.id
+        )
+        user.selected_organization_id = organization.id
+
     return user
 
 

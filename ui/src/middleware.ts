@@ -19,7 +19,7 @@ export function middleware(request: NextRequest) {
   }
 
   // If no token exists, but we are in local mode, check if we should redirect to sign-in
-  const isSignInPage = request.nextUrl.pathname === '/sign-in' || request.nextUrl.pathname === '/sign-up';
+  const isSignInPage = request.nextUrl.pathname === '/sign-in' || request.nextUrl.pathname === '/sign-up' || request.nextUrl.pathname === '/after-sign-in';
   const token = request.cookies.get(OSS_TOKEN_COOKIE);
 
   if (!token && !isSignInPage) {
