@@ -19,39 +19,50 @@ export async function POST(request: Request) {
             const data = await response.json();
             const token = data.access_token;
 
-            // Fetch user profile from backend to store in cookie
-            const userResponse = await fetch(`${backendUrl}/api/v1/user/config`, {
-                headers: { Authorization: `Bearer ${token}` },
+            // Try to fetch user profile from backend
+            let user = {
+                id: 0,
+                name: email,
+                provider: 'local',
+                organizationId: null as number | null,
+            };
+
+            try {
+                const userResponse = await fetch(`${backendUrl}/api/v1/user/auth/user`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+
+                if (userResponse.ok) {
+                    const userData = await userResponse.json();
+                    user = {
+                        id: userData.id,
+                        name: email,
+                        provider: 'local',
+                        organizationId: userData.selected_organization_id || null,
+                    };
+                }
+            } catch (e) {
+                console.warn('Could not fetch user profile, using defaults', e);
+            }
+
+            const cookieStore = await cookies();
+            cookieStore.set(OSS_TOKEN_COOKIE, token, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'lax',
+                maxAge: 60 * 60 * 24 * 30, // 30 days
+                path: '/',
             });
 
-            if (userResponse.ok) {
-                const userData = await userResponse.json();
-                const user = {
-                    id: userData.id,
-                    name: userData.email,
-                    provider: 'local',
-                    organizationId: userData.selected_organization_id,
-                };
+            cookieStore.set(OSS_USER_COOKIE, JSON.stringify(user), {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'lax',
+                maxAge: 60 * 60 * 24 * 30, // 30 days
+                path: '/',
+            });
 
-                const cookieStore = await cookies();
-                cookieStore.set(OSS_TOKEN_COOKIE, token, {
-                    httpOnly: true,
-                    secure: process.env.NODE_ENV === 'production',
-                    sameSite: 'lax',
-                    maxAge: 60 * 60 * 24 * 30, // 30 days
-                    path: '/',
-                });
-
-                cookieStore.set(OSS_USER_COOKIE, JSON.stringify(user), {
-                    httpOnly: true,
-                    secure: process.env.NODE_ENV === 'production',
-                    sameSite: 'lax',
-                    maxAge: 60 * 60 * 24 * 30, // 30 days
-                    path: '/',
-                });
-
-                return NextResponse.json({ success: true, user });
-            }
+            return NextResponse.json({ success: true, user });
         }
 
         const errorData = await response.json();
