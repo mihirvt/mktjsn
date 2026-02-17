@@ -32,7 +32,7 @@ MPS_API_URL = os.getenv("MPS_API_URL", "https://services.dograh.com")
 ENABLE_AWS_S3 = os.getenv("ENABLE_AWS_S3", "false").lower() == "true"
 
 # MinIO Configuration
-# MinIO Configuration (set MINIO_ENDPOINT env var explicitly in container orchestrators)
+# MinIO Configuration
 IS_DOCKER = os.path.exists("/.dockerenv")
 DEFAULT_MINIO_ENDPOINT = "minio:9000" if IS_DOCKER else "localhost:9000"
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", DEFAULT_MINIO_ENDPOINT)
