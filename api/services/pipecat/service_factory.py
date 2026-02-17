@@ -1,7 +1,9 @@
 from typing import TYPE_CHECKING
 
+import httpx
 from fastapi import HTTPException
 from loguru import logger
+from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 
 from api.constants import MPS_API_URL
 from api.services.configuration.registry import ServiceProviders
@@ -28,6 +30,58 @@ from pipecat.utils.text.xml_function_tag_filter import XMLFunctionTagFilter
 
 if TYPE_CHECKING:
     from api.services.pipecat.audio_config import AudioConfig
+
+# --------------------------------------------------------------------------- #
+# Shared HTTP client pool for LLM services                                    #
+# --------------------------------------------------------------------------- #
+# Each LLM call creates a new service instance → new AsyncOpenAI client →     #
+# new httpx client → fresh TLS handshake.  From India → US providers this     #
+# adds ~400-500 ms per call (TCP + TLS over 200 ms RTT).                      #
+#                                                                             #
+# By sharing a single httpx client across all LLM service instances, the TLS  #
+# connection stays warm between calls, eliminating that overhead.             #
+# --------------------------------------------------------------------------- #
+_shared_http_clients: dict[str, DefaultAsyncHttpxClient] = {}
+
+
+def get_shared_http_client(base_url: str) -> DefaultAsyncHttpxClient:
+    """Return a shared httpx client for the given base_url.
+
+    The client is cached per base_url so that TLS connections are reused
+    across pipeline runs, avoiding repeated handshake latency.
+    """
+    if base_url not in _shared_http_clients:
+        logger.info(f"Creating shared HTTP client pool for: {base_url}")
+        _shared_http_clients[base_url] = DefaultAsyncHttpxClient(
+            limits=httpx.Limits(
+                max_keepalive_connections=100,
+                max_connections=1000,
+                keepalive_expiry=None,  # Never expire idle connections
+            ),
+        )
+    return _shared_http_clients[base_url]
+
+
+def _patch_llm_client(service, base_url: str):
+    """Replace the LLM service's internal AsyncOpenAI client with one that
+    uses a shared httpx connection pool.
+
+    This avoids modifying the pipecat submodule while still getting the
+    benefit of TLS connection reuse across pipeline runs.
+    """
+    shared_client = get_shared_http_client(base_url)
+    old_client = service._client
+
+    # Recreate the AsyncOpenAI client with the shared http_client
+    service._client = AsyncOpenAI(
+        api_key=old_client.api_key,
+        base_url=str(old_client.base_url),
+        organization=old_client.organization,
+        project=old_client.project,
+        http_client=shared_client,
+    )
+    logger.debug(f"Patched LLM client to use shared HTTP pool for: {base_url}")
+    return service
 
 
 def create_stt_service(
@@ -241,8 +295,9 @@ def create_llm_service(user_config):
         f"Creating LLM service: provider={user_config.llm.provider}, model={model}"
     )
     if user_config.llm.provider == ServiceProviders.OPENAI.value:
+        base_url = "https://api.openai.com/v1"
         if "gpt-5" in model:
-            return OpenAILLMService(
+            svc = OpenAILLMService(
                 api_key=user_config.llm.api_key,
                 model=model,
                 params=OpenAILLMService.InputParams(
@@ -250,42 +305,48 @@ def create_llm_service(user_config):
                 ),
             )
         else:
-            return OpenAILLMService(
+            svc = OpenAILLMService(
                 api_key=user_config.llm.api_key,
                 model=model,
                 params=OpenAILLMService.InputParams(temperature=0.1),
             )
+        return _patch_llm_client(svc, base_url)
     elif user_config.llm.provider == ServiceProviders.GROQ.value:
+        base_url = "https://api.groq.com/openai/v1"
         print(
             f"Creating Groq LLM service with API key: {user_config.llm.api_key} and model: {model}"
         )
-        return GroqLLMService(
+        svc = GroqLLMService(
             api_key=user_config.llm.api_key,
             model=model,
             params=OpenAILLMService.InputParams(temperature=0.1),
         )
+        return _patch_llm_client(svc, base_url)
     elif user_config.llm.provider == ServiceProviders.OPENROUTER.value:
-        return OpenRouterLLMService(
+        base_url = user_config.llm.base_url or "https://openrouter.ai/api/v1"
+        svc = OpenRouterLLMService(
             api_key=user_config.llm.api_key,
             model=model,
-            base_url=user_config.llm.base_url,
+            base_url=base_url,
             params=OpenAILLMService.InputParams(temperature=0.1),
         )
+        return _patch_llm_client(svc, base_url)
     elif user_config.llm.provider == ServiceProviders.GOOGLE.value:
-        # Use the correct InputParams class for Google to avoid propagating OpenAI-specific
-        # NOT_GIVEN sentinels that break Pydantic validation in GoogleLLMService.
+        # Google uses its own client (not AsyncOpenAI), no patching needed
         return GoogleLLMService(
             api_key=user_config.llm.api_key,
             model=model,
             params=GoogleLLMService.InputParams(temperature=0.1),
         )
     elif user_config.llm.provider == ServiceProviders.AZURE.value:
-        return AzureLLMService(
+        base_url = user_config.llm.endpoint
+        svc = AzureLLMService(
             api_key=user_config.llm.api_key,
             endpoint=user_config.llm.endpoint,
             model=model,  # Azure uses deployment name as model
             params=AzureLLMService.InputParams(temperature=0.1),
         )
+        return _patch_llm_client(svc, base_url)
     elif user_config.llm.provider == ServiceProviders.DOGRAH.value:
         return DograhLLMService(
             base_url=f"{MPS_API_URL}/api/v1/llm",
