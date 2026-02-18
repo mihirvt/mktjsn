@@ -36,9 +36,10 @@ class BaseServiceConfiguration(BaseModel):
         ServiceProviders.GOOGLE,
         ServiceProviders.AZURE,
         ServiceProviders.DOGRAH,
-        # ServiceProviders.SARVAM,
+        ServiceProviders.SARVAM,
     ]
     api_key: str
+
 
 
 class BaseLLMConfiguration(BaseServiceConfiguration):
@@ -144,6 +145,7 @@ OPENROUTER_MODELS = [
 ]
 AZURE_MODELS = ["gpt-4.1-mini"]
 DOGRAH_LLM_MODELS = ["default", "accurate", "fast", "lite", "zen"]
+SARVAM_LLM_MODELS = ["sarvam-m"]
 
 
 @register_llm
@@ -151,6 +153,7 @@ class OpenAILLMService(BaseLLMConfiguration):
     provider: Literal[ServiceProviders.OPENAI] = ServiceProviders.OPENAI
     model: str = Field(default="gpt-4.1", json_schema_extra={"examples": OPENAI_MODELS})
     api_key: str
+
 
 
 @register_llm
@@ -162,6 +165,7 @@ class GoogleLLMService(BaseLLMConfiguration):
     api_key: str
 
 
+
 @register_llm
 class GroqLLMService(BaseLLMConfiguration):
     provider: Literal[ServiceProviders.GROQ] = ServiceProviders.GROQ
@@ -171,6 +175,7 @@ class GroqLLMService(BaseLLMConfiguration):
     api_key: str
 
 
+
 @register_llm
 class OpenRouterLLMConfiguration(BaseLLMConfiguration):
     provider: Literal[ServiceProviders.OPENROUTER] = ServiceProviders.OPENROUTER
@@ -178,6 +183,7 @@ class OpenRouterLLMConfiguration(BaseLLMConfiguration):
         default="openai/gpt-4.1", json_schema_extra={"examples": OPENROUTER_MODELS}
     )
     api_key: str
+
     base_url: str = Field(default="https://openrouter.ai/api/v1")
 
 
@@ -188,6 +194,7 @@ class AzureLLMService(BaseLLMConfiguration):
         default="gpt-4.1-mini", json_schema_extra={"examples": AZURE_MODELS}
     )
     api_key: str
+
     endpoint: str
 
 
@@ -200,6 +207,25 @@ class DograhLLMService(BaseLLMConfiguration):
     api_key: str
 
 
+@register_llm
+class SarvamLLMService(BaseLLMConfiguration):
+    provider: Literal[ServiceProviders.SARVAM] = ServiceProviders.SARVAM
+    model: str = Field(
+        default="sarvam-m", json_schema_extra={"examples": SARVAM_LLM_MODELS}
+    )
+    reasoning_effort: Literal["low", "medium", "high"] = Field(
+        default="medium", description="Controls the reasoning depth of the model."
+    )
+    temperature: float = Field(
+        default=0.2,
+        ge=0.0,
+        le=2.0,
+        description="Controls randomness. 0.2 recommended for non-thinking, 0.5 for thinking mode.",
+    )
+    api_key: str
+
+
+
 LLMConfig = Annotated[
     Union[
         OpenAILLMService,
@@ -208,6 +234,7 @@ LLMConfig = Annotated[
         GoogleLLMService,
         AzureLLMService,
         DograhLLMService,
+        SarvamLLMService,
     ],
     Field(discriminator="provider"),
 ]
@@ -220,6 +247,7 @@ class DeepgramTTSConfiguration(BaseServiceConfiguration):
     provider: Literal[ServiceProviders.DEEPGRAM] = ServiceProviders.DEEPGRAM
     voice: str = "aura-2-helena-en"
     api_key: str
+
 
     @computed_field
     @property
@@ -250,6 +278,7 @@ class ElevenlabsTTSConfiguration(BaseServiceConfiguration):
     api_key: str
 
 
+
 OPENAI_TTS_MODELS = ["gpt-4o-mini-tts"]
 
 
@@ -261,6 +290,7 @@ class OpenAITTSService(BaseTTSConfiguration):
     )
     voice: str = "alloy"
     api_key: str
+
 
 
 DOGRAH_TTS_MODELS = ["default"]
@@ -275,6 +305,7 @@ class DograhTTSService(BaseTTSConfiguration):
     voice: str = "default"
     speed: float = Field(default=1.0, ge=0.5, le=2.0, description="Speed of the voice")
     api_key: str
+
 
 
 SARVAM_TTS_MODELS = ["bulbul:v2", "bulbul:v3"]
@@ -356,6 +387,7 @@ class SarvamTTSConfiguration(BaseTTSConfiguration):
         default="hi-IN", json_schema_extra={"examples": SARVAM_LANGUAGES}
     )
     api_key: str
+
 
 
 TTSConfig = Annotated[
@@ -477,10 +509,12 @@ class DeepgramSTTConfiguration(BaseSTTConfiguration):
     api_key: str
 
 
+
 @register_stt
 class CartesiaSTTConfiguration(BaseSTTConfiguration):
     provider: Literal[ServiceProviders.CARTESIA] = ServiceProviders.CARTESIA
     api_key: str
+
 
 
 OPENAI_STT_MODELS = ["gpt-4o-transcribe"]
@@ -493,6 +527,7 @@ class OpenAISTTConfiguration(BaseSTTConfiguration):
         default="gpt-4o-transcribe", json_schema_extra={"examples": OPENAI_STT_MODELS}
     )
     api_key: str
+
 
 
 # Dograh STT Service
@@ -512,6 +547,7 @@ class DograhSTTService(BaseSTTConfiguration):
     api_key: str
 
 
+
 # Sarvam STT Service
 SARVAM_STT_MODELS = ["saarika:v2.5", "saaras:v2"]
 
@@ -526,6 +562,7 @@ class SarvamSTTConfiguration(BaseSTTConfiguration):
         default="hi-IN", json_schema_extra={"examples": SARVAM_LANGUAGES}
     )
     api_key: str
+
 
 
 # Speechmatics STT Service
@@ -568,6 +605,7 @@ class SpeechmaticsSTTConfiguration(BaseSTTConfiguration):
     api_key: str
 
 
+
 STTConfig = Annotated[
     Union[
         DeepgramSTTConfiguration,
@@ -594,6 +632,7 @@ class OpenAIEmbeddingsConfiguration(BaseEmbeddingsConfiguration):
     api_key: str
 
 
+
 OPENROUTER_EMBEDDING_MODELS = ["openai/text-embedding-3-small"]
 
 
@@ -605,6 +644,7 @@ class OpenRouterEmbeddingsConfiguration(BaseEmbeddingsConfiguration):
         json_schema_extra={"examples": OPENROUTER_EMBEDDING_MODELS},
     )
     api_key: str
+
     base_url: str = Field(default="https://openrouter.ai/api/v1")
 
 

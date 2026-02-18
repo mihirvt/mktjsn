@@ -22,6 +22,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.services.openai.tts import OpenAITTSService
 from pipecat.services.openrouter.llm import OpenRouterLLMService
+from pipecat.services.sarvam.llm import SarvamLLMService
 from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.services.sarvam.tts import SarvamTTSService
 from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
@@ -353,5 +354,16 @@ def create_llm_service(user_config):
             api_key=user_config.llm.api_key,
             model=model,
         )
+    elif user_config.llm.provider == ServiceProviders.SARVAM.value:
+        base_url = "https://api.sarvam.ai/v1"
+        svc = SarvamLLMService(
+            api_key=user_config.llm.api_key,
+            model=model,
+            params=OpenAILLMService.InputParams(
+                temperature=user_config.llm.temperature,
+                extra={"reasoning_effort": user_config.llm.reasoning_effort},
+            ),
+        )
+        return _patch_llm_client(svc, base_url)
     else:
         raise HTTPException(status_code=400, detail="Invalid LLM provider")
