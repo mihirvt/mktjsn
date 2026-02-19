@@ -63,7 +63,6 @@ services:
     build:
       context: .
       dockerfile: api/Dockerfile
-    image: ${REGISTRY:-dograhai}/dograh-api:latest
     volumes:
       - shared-tmp:/tmp
     environment:
@@ -129,7 +128,6 @@ services:
     build:
       context: .
       dockerfile: ui/Dockerfile
-    image: ${REGISTRY:-dograhai}/dograh-ui:latest
     environment:
       # Server-side URL (SSR, internal Docker network)
       BACKEND_URL: "http://api:8000"
