@@ -11,7 +11,7 @@ services:
         max-size: "10m"
         max-file: "3"
     ports:
-      - "5432:5432"
+      - "5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -25,7 +25,7 @@ services:
   redis:
     image: redis:7
     ports:
-      - "6379:6379"
+      - "6379"
     command: >
       --requirepass redissecret
     volumes:
@@ -47,8 +47,8 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
       MINIO_API_CORS_ALLOW_ORIGIN: "*"
     ports:
-      - "127.0.0.1:9000:9000" # Bind to localhost explicitly
-      - "127.0.0.1:9001:9001"
+      - "9000"
+      - "9001"
     volumes:
       - minio-data:/data
     healthcheck:
@@ -107,7 +107,7 @@ services:
       TURN_SECRET: "${TURN_SECRET:-dograh-turn-secret-change-in-production}"
 
     ports:
-      - "8000:8000"
+      - "8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -144,7 +144,7 @@ services:
       # Sentry
       SENTRY_DSN: "https://d9387fed5f80e90781f1dbd9b2c0994c@o4509486225096704.ingest.us.sentry.io/4510124708200448"
     ports:
-      - "3010:3010"
+      - "3010"
     depends_on:
       api:
         condition: service_healthy
