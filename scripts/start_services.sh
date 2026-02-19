@@ -76,7 +76,8 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 FASTAPI_PORT=${FASTAPI_PORT:-8000}
-FASTAPI_WORKERS=${FASTAPI_WORKERS:-1}
+CPU_CORES=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
+FASTAPI_WORKERS=${FASTAPI_WORKERS:-$CPU_CORES}
 
 ###############################################################################
 ### 2) Define services
