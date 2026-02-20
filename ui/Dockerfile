@@ -71,4 +71,4 @@ USER nextjs
 EXPOSE 3010
 
 # Start the production server using the standalone Node.js server
-CMD sh -c "echo '🚀 Application ready at http://localhost:3010' && PORT=3010 node server.js"
+CMD sh -c "echo '🚀 Application ready at http://0.0.0.0:3010' && HOSTNAME=0.0.0.0 PORT=3010 node server.js"
