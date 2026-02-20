@@ -214,6 +214,7 @@ rm -f "$RUN_DIR/uvicorn.port" "$RUN_DIR/uvicorn_new.port" "$RUN_DIR/uvicorn_old.
 ### 5) Run migrations
 ###############################################################################
 
+python api/fix_db.py || true
 alembic -c "$BASE_DIR/api/alembic.ini" upgrade head
 
 ###############################################################################
