@@ -34,6 +34,7 @@ If you pull from Upstream, and they added a new database table, you will see a `
 
 ## 🐳 5. YAML Overwrites
 We significantly cleaned up `docker-compose.yaml` (e.g., removing `cloudflared`). If you rebase or merge from upstream, Git will try to re-insert their `cloudflared` services. Always manually delete those services from the YAML during a conflict resolution.
+* **CRITICAL Build Blocks:** Upstream removed the `build:` blocks from `api` and `ui` in `docker-compose.yaml` to rely on remote registries. **You MUST ensure the `build:` property exists** in both the `api` and `ui` blocks, otherwise Coolify will simply download their vanilla factory images instead of compiling your custom constraints and `api/fix_db.py` fixes!
 
 ---
 **SUMMARY:**
