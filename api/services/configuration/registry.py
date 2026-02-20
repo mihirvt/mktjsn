@@ -277,6 +277,19 @@ class DograhTTSService(BaseTTSConfiguration):
     api_key: str
 
 
+CARTESIA_TTS_MODELS = ["sonic-3"]
+
+
+@register_tts
+class CartesiaTTSConfiguration(BaseTTSConfiguration):
+    provider: Literal[ServiceProviders.CARTESIA] = ServiceProviders.CARTESIA
+    model: str = Field(
+        default="sonic-3", json_schema_extra={"examples": CARTESIA_TTS_MODELS}
+    )
+    voice: str = Field(default="a167e0f3-df7e-4d52-a9c3-f949145571bd")
+    api_key: str
+
+
 SARVAM_TTS_MODELS = ["bulbul:v2", "bulbul:v3"]
 SARVAM_V2_VOICES = [
     "anushka",
@@ -371,6 +384,7 @@ TTSConfig = Annotated[
         DeepgramTTSConfiguration,
         OpenAITTSService,
         ElevenlabsTTSConfiguration,
+        CartesiaTTSConfiguration,
         DograhTTSService,
         SarvamTTSConfiguration,
     ],
@@ -485,9 +499,15 @@ class DeepgramSTTConfiguration(BaseSTTConfiguration):
     api_key: str
 
 
+CARTESIA_STT_MODELS = ["ink-whisper"]
+
+
 @register_stt
 class CartesiaSTTConfiguration(BaseSTTConfiguration):
     provider: Literal[ServiceProviders.CARTESIA] = ServiceProviders.CARTESIA
+    model: str = Field(
+        default="ink-whisper", json_schema_extra={"examples": CARTESIA_STT_MODELS}
+    )
     api_key: str
 
 

@@ -7,6 +7,7 @@ from api.constants import MPS_API_URL
 from api.services.configuration.registry import ServiceProviders
 from pipecat.services.azure.llm import AzureLLMService
 from pipecat.services.cartesia.stt import CartesiaSTTService
+from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
 from pipecat.services.deepgram.stt import DeepgramSTTService, LiveOptions
 from pipecat.services.deepgram.tts import DeepgramTTSService
@@ -189,6 +190,13 @@ def create_tts_service(user_config, audio_config: "AudioConfig"):
             params=ElevenLabsTTSService.InputParams(
                 stability=0.8, speed=user_config.tts.speed, similarity_boost=0.75
             ),
+            text_filters=[xml_function_tag_filter],
+        )
+    elif user_config.tts.provider == ServiceProviders.CARTESIA.value:
+        return CartesiaTTSService(
+            api_key=user_config.tts.api_key,
+            voice_id=user_config.tts.voice,
+            model=user_config.tts.model,
             text_filters=[xml_function_tag_filter],
         )
     elif user_config.tts.provider == ServiceProviders.DOGRAH.value:
