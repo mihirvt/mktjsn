@@ -16,7 +16,9 @@ To survive future rebases, **NEVER** scatter custom logic across the upstream co
 ## 🧠 2. UI Memory Restraints (The 2GB Rule)
 Our deployment VPS lacks the memory of a large corporate server. The UI builder container **will OOM crash the server** if left unrestricted.
 * **Dockerfile Location:** `ui/Dockerfile`
-* **The Rule:** You MUST keep `ENV NODE_OPTIONS="--max-old-space-size=2048"` intact in the UI Builder stage. Do not increase it to `4096`. Do not delete it.
+* **Node Options:** You MUST keep `ENV NODE_OPTIONS="--max-old-space-size=2048"` intact in the UI Builder stage. Do not increase it to `4096`. Do not delete it.
+* **Sentry Source Maps:** Next.js uses absurd amounts of RAM generating source maps during `npm run build` (triggering Linux exit code 134 OOM Killer). In `ui/next.config.ts`, `sourcemaps: { disable: true }` and `widenClientFileUpload: false` must remain active.
+* **Linting During Build:** We bypass Next.js default linting and type-checking during the Docker build stage to save RAM. In `ui/next.config.ts`, `eslint: { ignoreDuringBuilds: true }` and `typescript: { ignoreBuildErrors: true }` must be present.
 
 ## 📦 3. strict dependency requirements
 * **React 19 Conflicts:** The UI uses Next.js 15 & React 19. Many older packages will throw Peer Dependency errors during a build.
@@ -36,6 +38,11 @@ If you pull from Upstream, and they added a new database table, you will see a `
 We significantly cleaned up `docker-compose.yaml` (e.g., removing `cloudflared`). If you rebase or merge from upstream, Git will try to re-insert their `cloudflared` services. Always manually delete those services from the YAML during a conflict resolution.
 * **CRITICAL Build Blocks:** Upstream removed the `build:` blocks from `api` and `ui` in `docker-compose.yaml` to rely on remote registries. **You MUST ensure the `build:` property exists** in both the `api` and `ui` blocks, otherwise Coolify will simply download their vanilla factory images instead of compiling your custom constraints and `api/fix_db.py` fixes!
 
+## 🌐 6. Next.js Docker Networking Constraints
+Coolify and Alpine Linux handle networking differently than a raw Ubuntu server. Follow these rules or the website UI will crash and Coolify will drop the traffic.
+* **The Alpine IPv6 Trap:** In Alpine Linux, `localhost` resolves to an IPv6 `::1` address. Next.js natively binds to IPv4. Therefore, Docker healthchecks using `wget http://localhost:3010` **will fail**. Your Docker Compose health check must explicitly use `http://127.0.0.1:3010` or else Coolify will see the UI container as 'unhealthy' and sever public access.
+* **UI Server Binding:** In `ui/Dockerfile`, when running Next.js standalone, the command MUST specify `HOSTNAME=0.0.0.0` (e.g., `CMD sh -c "HOSTNAME=0.0.0.0 PORT=3010 node server.js"`). If omitted, Next.js blocks incoming public traffic.
+* **API Client Backend Discovery:** `dograh/upstream`'s `route.ts` API client blindly falls back to pulling from internal Docker networks (e.g. `http://api:8000`) and passes that string back to the user's web browser as `http://localhost:8000`, causing `CONNECTION_REFUSED` on login. In `ui/src/app/api/config/version/route.ts`, if the environment is a docker internal IP, the `clientApiBaseUrl` must be `null` so the browser gracefully falls back to `window.location.origin` without guessing port numbers.
 ---
 **SUMMARY:**
 When updating the app: Fetch from upstream -> `git rebase` -> Fix conflicts with isolated plugins -> Enforce RAM ceilings -> Check Database Migrations -> Force Deploy.
