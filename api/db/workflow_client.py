@@ -2,7 +2,7 @@ import hashlib
 import json
 from typing import Optional
 
-from sqlalchemy import func
+from sqlalchemy import func, update
 from sqlalchemy.future import select
 from sqlalchemy.orm import load_only, selectinload
 
@@ -72,15 +72,14 @@ class WorkflowClient(BaseDBClient):
 
                 # Mark this definition as the current one and unset others
                 definition.is_current = True
-                # Set any other definitions for this workflow to not current
-                other_defs_result = await session.execute(
-                    select(WorkflowDefinitionModel).where(
+                await session.execute(
+                    update(WorkflowDefinitionModel)
+                    .where(
                         WorkflowDefinitionModel.workflow_id == new_workflow.id,
                         WorkflowDefinitionModel.id != definition.id,
                     )
+                    .values(is_current=False)
                 )
-                for other_def in other_defs_result.scalars().all():
-                    other_def.is_current = False
 
                 await session.commit()
             except Exception as e:
@@ -270,14 +269,14 @@ class WorkflowClient(BaseDBClient):
 
                 # Mark new definition as current and reset others
                 definition.is_current = True
-                other_defs_result = await session.execute(
-                    select(WorkflowDefinitionModel).where(
+                await session.execute(
+                    update(WorkflowDefinitionModel)
+                    .where(
                         WorkflowDefinitionModel.workflow_id == workflow_id,
                         WorkflowDefinitionModel.id != definition.id,
                     )
+                    .values(is_current=False)
                 )
-                for other_def in other_defs_result.scalars().all():
-                    other_def.is_current = False
 
             try:
                 await session.commit()
