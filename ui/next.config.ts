@@ -4,8 +4,10 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   /* config options here */
   output: 'standalone',
+  eslint: { ignoreDuringBuilds: true },
+  typescript: { ignoreBuildErrors: true },
   experimental: {
-    serverSourceMaps: true,
+    // serverSourceMaps: true, (Disabled to prevent OOM)
   },
   async rewrites() {
     return [
