@@ -250,6 +250,14 @@ echo -e "${BLUE}[6/8] Updating environment variables...${NC}"
 if [[ -f ".env" ]]; then
     # Update BACKEND_API_ENDPOINT to use domain
     sed -i.bak "s|^BACKEND_API_ENDPOINT=.*|BACKEND_API_ENDPOINT=https://$DOMAIN_NAME|" .env
+    # Update BACKEND_URL if present, otherwise add it
+    if grep -q "^BACKEND_URL=" .env; then
+        sed -i.bak "s|^BACKEND_URL=.*|BACKEND_URL=https://$DOMAIN_NAME|" .env
+    else
+        echo "" >> .env
+        echo "# Backend URL for UI" >> .env
+        echo "BACKEND_URL=https://$DOMAIN_NAME" >> .env
+    fi
     # Update TURN_HOST to use domain
     sed -i.bak "s|^TURN_HOST=.*|TURN_HOST=$DOMAIN_NAME|" .env
     rm -f .env.bak

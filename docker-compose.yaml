@@ -151,7 +151,7 @@ services:
     image: ${REGISTRY:-dograhai}/dograh-ui:latest
     environment:
       # Server-side URL (SSR, internal Docker network)
-      BACKEND_URL: "http://api:8000"
+      BACKEND_URL: "${BACKEND_URL:-http://api:8000}"
       NODE_ENV: "oss"
       # Flag to enable/ disable posthog and sentry
       ENABLE_TELEMETRY: "${ENABLE_TELEMETRY:-true}"

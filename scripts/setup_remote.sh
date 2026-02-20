@@ -173,6 +173,9 @@ cat > .env << ENV_EOF
 # Backend API endpoint (for remote deployment)
 BACKEND_API_ENDPOINT=https://$SERVER_IP
 
+# Backend URL for UI
+BACKEND_URL=https://$SERVER_IP
+
 # TURN Server Configuration (time-limited credentials via TURN REST API)
 TURN_HOST=$SERVER_IP
 TURN_SECRET=$TURN_SECRET
