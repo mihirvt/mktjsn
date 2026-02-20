@@ -23,6 +23,7 @@ from pipecat.services.openai.tts import OpenAITTSService
 from pipecat.services.openrouter.llm import OpenRouterLLMService
 from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.services.sarvam.tts import SarvamTTSService
+from api.plugins.sarvam import SarvamLLMService
 from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.text.xml_function_tag_filter import XMLFunctionTagFilter
@@ -299,6 +300,12 @@ def create_llm_service(user_config):
             base_url=f"{MPS_API_URL}/api/v1/llm",
             api_key=user_config.llm.api_key,
             model=model,
+        )
+    elif user_config.llm.provider == ServiceProviders.SARVAM.value:
+        return SarvamLLMService(
+            api_key=user_config.llm.api_key,
+            model=model,
+            params=OpenAILLMService.InputParams(temperature=0.1),
         )
     else:
         raise HTTPException(status_code=400, detail="Invalid LLM provider")

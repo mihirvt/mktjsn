@@ -200,6 +200,18 @@ class DograhLLMService(BaseLLMConfiguration):
     api_key: str
 
 
+SARVAM_LLM_MODELS = ["sarvam-m", "sarvam-m-2"]
+
+
+@register_llm
+class SarvamLLMService(BaseLLMConfiguration):
+    provider: Literal[ServiceProviders.SARVAM] = ServiceProviders.SARVAM
+    model: str = Field(
+        default="sarvam-m", json_schema_extra={"examples": SARVAM_LLM_MODELS}
+    )
+    api_key: str
+
+
 LLMConfig = Annotated[
     Union[
         OpenAILLMService,
@@ -208,6 +220,7 @@ LLMConfig = Annotated[
         GoogleLLMService,
         AzureLLMService,
         DograhLLMService,
+        SarvamLLMService,
     ],
     Field(discriminator="provider"),
 ]

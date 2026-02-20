@@ -15,7 +15,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 3s
       timeout: 3s
       retries: 10
@@ -31,7 +31,7 @@ services:
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "redissecret", "ping"]
+      test: [ "CMD", "redis-cli", "-a", "redissecret", "ping" ]
       interval: 3s
       timeout: 10s
       retries: 10
@@ -52,25 +52,10 @@ services:
     volumes:
       - minio-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - app-network
-
-  nginx:
-    image: nginx:alpine
-    container_name: nginx_https
-    profiles: ["remote"]
-    depends_on:
-      - ui
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./certs:/etc/nginx/certs:ro
     networks:
       - app-network
 
@@ -132,14 +117,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-      cloudflared:
-        condition: service_started
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8000/api/v1/health'').read()"',
-        ]
+      test: [ "CMD-SHELL", 'python -c "import urllib.request; urllib.request.urlopen(''http://localhost:8000/api/v1/health'').read()"' ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -168,11 +147,7 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "wget --no-verbose --tries=1 --spider http://localhost:3010 || exit 1",
-        ]
+      test: [ "CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3010 || exit 1" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -180,20 +155,11 @@ services:
     networks:
       - app-network
 
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: cloudflared-tunnel
-    command: tunnel --no-autoupdate --url http://api:8000 --metrics 0.0.0.0:2000
-    ports:
-      - "2000:2000" # Expose metrics endpoint
-    networks:
-      - app-network
-
   coturn:
     image: coturn/coturn:4.8.0
     container_name: coturn
     restart: unless-stopped
-    profiles: ["remote"]
+    profiles: [ "remote" ]
     ports:
       - "3478:3478/udp"
       - "3478:3478/tcp"

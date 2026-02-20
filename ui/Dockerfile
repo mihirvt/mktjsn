@@ -12,7 +12,7 @@ COPY ui/package*.json ./
 
 # Clean install with proper handling of native modules
 RUN rm -rf node_modules && \
-    npm ci || npm install
+    npm ci --legacy-peer-deps || npm install --legacy-peer-deps
 
 # Stage 2: Builder
 FROM node:20-alpine AS builder
@@ -44,7 +44,7 @@ ENV BACKEND_URL="http://api:8000"
 
 # Build the application with standalone mode
 # Increase Node.js heap size to prevent out-of-memory errors during build
-ENV NODE_OPTIONS="--max-old-space-size=4096"
+ENV NODE_OPTIONS="--max-old-space-size=2048"
 RUN npm run build && \
     rm -rf /tmp/* /root/.npm /root/.next/cache
 
