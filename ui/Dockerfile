@@ -54,6 +54,8 @@ WORKDIR /app
 
 # Environment variables will be provided by docker-compose
 ENV NODE_ENV=production
+# Prevent Alpine Node.js from endlessly locking CPU/GC causing Gateway Timeouts
+ENV NODE_OPTIONS="--max-old-space-size=2048"
 
 # Create a non-root user
 RUN addgroup --system --gid 1001 nodejs && \
