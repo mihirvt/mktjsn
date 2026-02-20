@@ -33,6 +33,10 @@ If you pull from Upstream, and they added a new database table, you will see a `
   2. Locate our custom table migration file in `api/alembic/versions/`.
   3. Modify `down_revision` in our file to literally equal the newest Revision ID that Upstream added.
   4. Now they form a clean line again!
+* **Robust Schema Recovery:** `dograh` utilizes an `api/fix_db.py` script on startup to forcefully overwrite missing Alembic head revisions.
+  * Because Alembic blindly trusts `api/fix_db.py` forcing the migration number, any schema differences will be permanently skipped unless dynamically checked. 
+  * If you edit database models, `api/fix_db.py` MUST query `information_schema.columns` via PostgreSQL async engine to accurately verify those columns manually exist before forcibly leaping ahead in migration history. 
+  * Upgrade migration blocks inside `api/alembic/versions/` must use `try...except sa.exc.ProgrammingError` bounds around `op.add_column` to silence "DuplicateColumn" exceptions in case tracking is temporarily lost.
 
 ## 🐳 5. YAML Overwrites
 We significantly cleaned up `docker-compose.yaml` (e.g., removing `cloudflared`). If you rebase or merge from upstream, Git will try to re-insert their `cloudflared` services. Always manually delete those services from the YAML during a conflict resolution.
