@@ -19,9 +19,10 @@ async def fix():
     engine = create_async_engine(url)
     try:
         async with engine.begin() as conn:
-            # We explicitly update the alembic_version table to prevent "Can't locate revision identified by 'fefdd1835c9e'"
-            result = await conn.execute(text("UPDATE alembic_version SET version_num = '6fd8fac02883' WHERE version_num = 'fefdd1835c9e'"))
-            print(f"Altered {result.rowcount} row(s) in alembic_version to match the true upstream HEAD.")
+            # Delete the ghost revision causing the 'Can't locate revision' error
+            # We use DELETE because the true upstream revision may already exist, which would cause an UPDATE to throw a UniqueViolation error.
+            result = await conn.execute(text("DELETE FROM alembic_version WHERE version_num = 'fefdd1835c9e'"))
+            print(f"Deleted {result.rowcount} ghost row(s) from alembic_version to fix migration chain.")
     except Exception as e:
         print(f"Error fixing database version: {e}")
     finally:
