@@ -19,5 +19,7 @@ passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 PyJWT==2.10.1
 email-validator==2.1.0
+wait_for2==0.4.1
+
 httpx>=0.27.0
 loguru>=0.7.2
