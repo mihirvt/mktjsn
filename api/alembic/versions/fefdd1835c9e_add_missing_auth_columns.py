@@ -1,7 +1,7 @@
 """Add missing auth columns to users table
 
 Revision ID: fefdd1835c9e
-Revises: fefdd1835b7d
+Revises: 6d2f94baf4b7
 Create Date: 2026-02-16 14:20:00.000000
 
 """
@@ -13,7 +13,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "fefdd1835c9e"
-down_revision: Union[str, None] = "34c8537dfde5"
+down_revision: Union[str, None] = "6d2f94baf4b7"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
