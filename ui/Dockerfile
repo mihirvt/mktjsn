@@ -58,6 +58,8 @@ WORKDIR /app
 # Environment variables will be provided by docker-compose or Coolify
 ENV NODE_ENV=production
 ENV BACKEND_URL="https://base-api.muktam.online"
+ENV HOSTNAME="0.0.0.0"
+ENV PORT=3010
 
 # Create a non-root user
 RUN addgroup --system --gid 1001 nodejs && \
@@ -74,5 +76,4 @@ USER nextjs
 # Expose the port Next.js runs on
 EXPOSE 3010
 
-# Start the production server using the standalone Node.js server
-CMD sh -c "echo '🚀 Application ready at http://localhost:3010' && PORT=3010 node server.js"
+CMD ["node", "server.js"]
