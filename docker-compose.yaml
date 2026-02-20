@@ -103,6 +103,9 @@ services:
       MINIO_BUCKET: "voice-audio"
       MINIO_SECURE: "false"
 
+      # FastAPI workers count
+      FASTAPI_WORKERS: 1
+
       # Langfuse
       ENABLE_TRACING: "false"
       # LANGFUSE_SECRET_KEY: ""
@@ -117,6 +120,8 @@ services:
       # Uses time-limited credentials via TURN REST API (HMAC-SHA1)
       TURN_HOST: "${TURN_HOST:-}"
       TURN_SECRET: "${TURN_SECRET:-}"
+
+      OSS_JWT_SECRET: "${OSS_JWT_SECRET:-ChangeMeInProduction}"
 
     ports:
       - "8000:8000"
@@ -148,7 +153,6 @@ services:
       # Server-side URL (SSR, internal Docker network)
       BACKEND_URL: "http://api:8000"
       NODE_ENV: "oss"
-
       # Flag to enable/ disable posthog and sentry
       ENABLE_TELEMETRY: "${ENABLE_TELEMETRY:-true}"
 
