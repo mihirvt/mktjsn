@@ -56,9 +56,11 @@ async def fix():
                 
                 # Step 4: Clear out corrupted legacy users (accounts created BEFORE passwords were required)
                 # This fixes the "Email already exists" on signup but "Invalid email" on login bug
-                del_res = await conn.execute(text("DELETE FROM users WHERE password_hash IS NULL"))
-                if del_res.rowcount > 0:
-                    print(f"Purged {del_res.rowcount} corrupted legacy user(s) with missing passwords to unlock re-registration.")
+                try:
+                    await conn.execute(text("DELETE FROM users WHERE password_hash IS NULL"))
+                    print("Purged corrupted legacy user(s) with missing passwords to unlock re-registration.")
+                except Exception as del_err:
+                    print(f"Warning: Could not purge legacy users: {del_err}")
                 
     except Exception as e:
         print(f"Error fixing database version: {e}")

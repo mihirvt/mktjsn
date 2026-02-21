@@ -21,7 +21,7 @@ Our deployment VPS lacks the memory of a large corporate server. The UI builder 
 * **Linting During Build:** We bypass Next.js default linting and type-checking during the Docker build stage to save RAM. In `ui/next.config.ts`, `eslint: { ignoreDuringBuilds: true }` and `typescript: { ignoreBuildErrors: true }` must be present.
 
 ## 📦 3. strict dependency requirements
-* **React 19 Conflicts:** The UI uses Next.js 15 & React 19. Many older packages will throw Peer Dependency errors during a build.
+* **React 19 Conflicts:** The UI uses Next.js 15 & React 19. Many older packages will throw Peer Dependency errors during a build.ially - actually their docs says 
     * **The Fix:** We exclusively use `npm ci --legacy-peer-deps` or `npm install --legacy-peer-deps` in the `ui/Dockerfile`. Do NOT revert to standard installs.
 * **Pipecat Patches:** Python requires `wait_for2==0.4.1` for Pipecat execution. If you wipe `api/requirements.txt`, ensure `wait_for2` is placed back in.
 

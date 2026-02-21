@@ -83,11 +83,14 @@ class UserConfigurationValidator:
 
     def _check_api_key(self, provider: str, api_key: str) -> bool:
         """Check if an API key for a provider is valid."""
-        validator = self._validator_map.get(provider)
+        # Provider might be an Enum object at runtime instead of a string
+        provider_val = provider.value if hasattr(provider, "value") else provider
+
+        validator = self._validator_map.get(provider_val)
         if not validator:
             return False
 
-        return validator(provider, api_key)
+        return validator(provider_val, api_key)
 
     def _check_openai_api_key(self, model: str, api_key: str) -> bool:
         if model in self._provider_api_key_validity_status:

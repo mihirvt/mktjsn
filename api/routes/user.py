@@ -85,6 +85,19 @@ async def get_user_configurations(
     user: UserModel = Depends(get_user),
 ) -> UserConfigurationRequestResponseSchema:
     user_configurations = await db_client.get_user_configurations(user.id)
+    
+    # Auto-provision if user signed up while MPS configuration generation was crashed
+    if not (user_configurations.llm or user_configurations.tts or user_configurations.stt):
+        from api.services.auth.depends import create_user_configuration_with_mps_key
+        try:
+            mps_config = await create_user_configuration_with_mps_key(
+                user.id, user.selected_organization_id, user.provider_id
+            )
+            if mps_config:
+                user_configurations = await db_client.update_user_configuration(user.id, mps_config)
+        except Exception as e:
+            logger.warning(f"Failed to auto-provision config on fetch: {e}")
+
     masked_config = mask_user_config(user_configurations)
 
     # Add organization pricing info if available
@@ -106,6 +119,18 @@ async def update_user_configurations(
     user: UserModel = Depends(get_user),
 ) -> UserConfigurationRequestResponseSchema:
     existing_config = await db_client.get_user_configurations(user.id)
+
+    # Auto-provision if user signed up while MPS configuration generation was crashed
+    if not (existing_config.llm or existing_config.tts or existing_config.stt):
+        from api.services.auth.depends import create_user_configuration_with_mps_key
+        try:
+            mps_config = await create_user_configuration_with_mps_key(
+                user.id, user.selected_organization_id, user.provider_id
+            )
+            if mps_config:
+                existing_config = await db_client.update_user_configuration(user.id, mps_config)
+        except Exception as e:
+            logger.warning(f"Failed to auto-provision config on put: {e}")
 
     incoming_dict = request.model_dump(exclude_none=True)
 
