@@ -68,7 +68,7 @@ services:
     environment:
       # Core application config
       ENVIRONMENT: "local"
-      AUTH_PROVIDER: "oss"
+      AUTH_PROVIDER: "local"
       LOG_LEVEL: "INFO"
 
       # Replace this environment variable if you are using a custom

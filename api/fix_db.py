@@ -54,6 +54,12 @@ async def fix():
                 else:
                     print(f"alembic_version has {count_res.scalar()} row(s) and DB is fully upgraded. No injection needed.")
                 
+                # Step 4: Clear out corrupted legacy users (accounts created BEFORE passwords were required)
+                # This fixes the "Email already exists" on signup but "Invalid email" on login bug
+                del_res = await conn.execute(text("DELETE FROM users WHERE password_hash IS NULL"))
+                if del_res.rowcount > 0:
+                    print(f"Purged {del_res.rowcount} corrupted legacy user(s) with missing passwords to unlock re-registration.")
+                
     except Exception as e:
         print(f"Error fixing database version: {e}")
     finally:
