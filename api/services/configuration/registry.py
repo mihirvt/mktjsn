@@ -394,9 +394,16 @@ class SarvamTTSConfiguration(BaseTTSConfiguration):
 
 
 GEMINI_TTS_MODELS = [
-    "gemini-2.5-flash-tts-lite",
-    "gemini-2.5-flash-tts",
-    "gemini-2.5-pro-tts",
+    "gemini-2.5-flash-preview-tts",
+    "gemini-2.5-flash-preview-tts-lite",
+    "gemini-2.5-pro-preview-tts",
+]
+GEMINI_TTS_VOICES = [
+    "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede", 
+    "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba", 
+    "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar", 
+    "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi", 
+    "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"
 ]
 
 
@@ -404,11 +411,10 @@ GEMINI_TTS_MODELS = [
 class GeminiTTSConfiguration(BaseTTSConfiguration):
     provider: Literal[ServiceProviders.GEMINI] = ServiceProviders.GEMINI
     model: str = Field(
-        default="gemini-2.5-flash-tts-lite", json_schema_extra={"examples": GEMINI_TTS_MODELS}
+        default="gemini-2.5-flash-preview-tts", json_schema_extra={"examples": GEMINI_TTS_MODELS}
     )
-    voice_prompt: str = Field(
-        default="You have a friendly, energetic American female voice.",
-        description="Natural language instruction for how the voice should sound."
+    voice: str = Field(
+        default="Zephyr", json_schema_extra={"examples": GEMINI_TTS_VOICES}
     )
     api_key: str
 

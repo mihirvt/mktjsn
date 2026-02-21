@@ -242,7 +242,7 @@ def create_tts_service(user_config, audio_config: "AudioConfig"):
         return GeminiTTSService(
             api_key=user_config.tts.api_key,
             model=user_config.tts.model,
-            voice_prompt=user_config.tts.voice_prompt,
+            voice_name=user_config.tts.voice,
             text_filters=[xml_function_tag_filter],
         )
     else:

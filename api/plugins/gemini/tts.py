@@ -26,14 +26,14 @@ class GeminiTTSService(TTSService):
         self,
         *,
         api_key: str,
-        voice_prompt: str,
-        model: str = "gemini-2.5-flash-tts-lite",
+        voice_name: str = "Zephyr",
+        model: str = "gemini-2.5-flash-preview-tts",
         sample_rate: int = 24000,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.api_key = api_key
-        self.voice_prompt = voice_prompt
+        self.voice_name = voice_name
         # Gemini expects 'models/' prefix but we will handle that in the URL
         self.model = model
         self.sample_rate = sample_rate
@@ -61,7 +61,7 @@ class GeminiTTSService(TTSService):
             yield ErrorFrame(error="Aiohttp session not initialized")
             return
 
-        logger.debug(f"Generating Gemini TTS for model '{self.model}' with prompt: '{self.voice_prompt}'")
+        logger.debug(f"Generating Gemini TTS for model '{self.model}' with voice/prompt: '{self.voice_name}'")
         
         # We use standard SSE streaming endpoint
         uri = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:streamGenerateContent?alt=sse&key={self.api_key}"
@@ -75,11 +75,15 @@ class GeminiTTSService(TTSService):
                         "parts": [{"text": text}]
                     }
                 ],
-                "systemInstruction": {
-                    "parts": [{"text": self.voice_prompt}]
-                },
                 "generationConfig": {
-                    "responseModalities": ["AUDIO"]
+                    "responseModalities": ["AUDIO"],
+                    "speechConfig": {
+                        "voiceConfig": {
+                            "prebuiltVoiceConfig": {
+                                "voiceName": self.voice_name
+                            }
+                        }
+                    }
                 }
             }
             
