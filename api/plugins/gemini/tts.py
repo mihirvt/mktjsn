@@ -56,7 +56,7 @@ class GeminiTTSService(TTSService):
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
 
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, *args, **kwargs) -> AsyncGenerator[Frame, None]:
         if not self.session:
             logger.error("Aiohttp session not initialized for GeminiTTSService")
             yield ErrorFrame(error="Aiohttp session not initialized")
