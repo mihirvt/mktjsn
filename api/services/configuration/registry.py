@@ -24,6 +24,7 @@ class ServiceProviders(str, Enum):
     DOGRAH = "dograh"
     SARVAM = "sarvam"
     SPEECHMATICS = "speechmatics"
+    GEMINI = "gemini"
 
 
 class BaseServiceConfiguration(BaseModel):
@@ -392,6 +393,26 @@ class SarvamTTSConfiguration(BaseTTSConfiguration):
     api_key: str
 
 
+GEMINI_TTS_MODELS = [
+    "gemini-2.5-flash-tts-lite",
+    "gemini-2.5-flash-tts",
+    "gemini-2.5-pro-tts",
+]
+
+
+@register_tts
+class GeminiTTSConfiguration(BaseTTSConfiguration):
+    provider: Literal[ServiceProviders.GEMINI] = ServiceProviders.GEMINI
+    model: str = Field(
+        default="gemini-2.5-flash-tts-lite", json_schema_extra={"examples": GEMINI_TTS_MODELS}
+    )
+    voice_prompt: str = Field(
+        default="You have a friendly, energetic American female voice.",
+        description="Natural language instruction for how the voice should sound."
+    )
+    api_key: str
+
+
 TTSConfig = Annotated[
     Union[
         DeepgramTTSConfiguration,
@@ -400,6 +421,7 @@ TTSConfig = Annotated[
         CartesiaTTSConfiguration,
         DograhTTSService,
         SarvamTTSConfiguration,
+        GeminiTTSConfiguration,
     ],
     Field(discriminator="provider"),
 ]
