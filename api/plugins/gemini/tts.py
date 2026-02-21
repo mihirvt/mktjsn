@@ -32,13 +32,12 @@ class GeminiTTSService(TTSService):
         sample_rate: int = 24000,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(sample_rate=sample_rate, **kwargs)
         self.api_key = api_key
         self.voice_name = voice_name
         self.voice_prompt = voice_prompt
         # Gemini expects 'models/' prefix but we will handle that in the URL
         self.model = model
-        self.sample_rate = sample_rate
         self.session: aiohttp.ClientSession | None = None
 
     def can_generate_metrics(self) -> bool:
