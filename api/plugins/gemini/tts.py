@@ -17,6 +17,12 @@ from pipecat.frames.frames import (
     CancelFrame,
 )
 
+try:
+    from pipecat.frames.frames import TTSAudioRawFrame
+except ImportError:
+    # Fallback to OutputAudioRawFrame if TTSAudioRawFrame is missing
+    from pipecat.frames.frames import OutputAudioRawFrame as TTSAudioRawFrame
+
 class GeminiTTSService(TTSService):
     """
     Pipcat TTS Service utilizing Gemini 2.5's REST streamGenerateContent API
@@ -58,6 +64,8 @@ class GeminiTTSService(TTSService):
         await super().cancel(frame)
 
     async def run_tts(self, text: str, *args, **kwargs) -> AsyncGenerator[Frame, None]:
+        context_id = args[0] if len(args) > 0 else kwargs.get("context_id")
+        
         if not self.session:
             logger.error("Aiohttp session not initialized for GeminiTTSService")
             yield ErrorFrame(error="Aiohttp session not initialized")
@@ -119,11 +127,15 @@ class GeminiTTSService(TTSService):
                                         b64_str = part["inlineData"].get("data")
                                         if b64_str:
                                             audio_bytes = base64.b64decode(b64_str)
-                                            yield AudioRawFrame(
-                                                audio=audio_bytes,
-                                                sample_rate=self.sample_rate,
-                                                num_channels=1
-                                            )
+                                            frame_kwargs = {
+                                                "audio": audio_bytes,
+                                                "sample_rate": self.sample_rate,
+                                                "num_channels": 1
+                                            }
+                                            if context_id is not None:
+                                                frame_kwargs["context_id"] = context_id
+                                            
+                                            yield TTSAudioRawFrame(**frame_kwargs)
                         except Exception as e:
                             logger.error(f"Failed to parse Gemini SSE chunk: {e}")
                             
