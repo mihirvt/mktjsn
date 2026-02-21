@@ -64,8 +64,8 @@ class GeminiTTSService(TTSService):
 
         logger.debug(f"Generating Gemini TTS for model '{self.model}' with voice/prompt: '{self.voice_name}'")
         
-        # We use standard SSE streaming endpoint
-        uri = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:streamGenerateContent?alt=sse&key={self.api_key}"
+        # Using standard unary generateContent endpoint because streamGenerateContent SSE throws 500 Internal Error on Google's backend for TTS
+        uri = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
         
         try:
             yield TTSStartedFrame()
@@ -100,39 +100,29 @@ class GeminiTTSService(TTSService):
                     yield ErrorFrame(error=f"Gemini TTS Error {resp.status}: {err_txt}")
                     return
 
-                # Read Server-Sent Events (SSE)
-                async for line in resp.content:
-                    if not line:
-                        continue
-                    line_str = line.decode('utf-8').strip()
-                    if line_str.startswith("data: "):
-                        json_str = line_str[6:].strip()
-                        if json_str == "[DONE]":
-                            break
-                        
-                        try:
-                            data = json.loads(json_str)
-                            if "candidates" in data and len(data["candidates"]) > 0:
-                                parts = data["candidates"][0].get("content", {}).get("parts", [])
-                                for part in parts:
-                                    # Depending on exactly how Gemini 2.5 returns audio chunks
-                                    if "inlineData" in part:
-                                        b64_str = part["inlineData"].get("data")
-                                        if b64_str:
-                                            audio_bytes = base64.b64decode(b64_str)
-                                            yield AudioRawFrame(
-                                                audio=audio_bytes,
-                                                sample_rate=self.sample_rate,
-                                                num_channels=1
-                                            )
-                                    elif "text" in part:
-                                        # Handle the scenario where model occasionally falls back to text modality
-                                        pass
-                        except Exception as e:
-                            logger.error(f"Failed to parse Gemini SSE chunk: {e}")
+                # Parse the unary JSON response
+                try:
+                    data = await resp.json()
+                    if "candidates" in data and len(data["candidates"]) > 0:
+                        parts = data["candidates"][0].get("content", {}).get("parts", [])
+                        for part in parts:
+                            if "inlineData" in part:
+                                b64_str = part["inlineData"].get("data")
+                                if b64_str:
+                                    audio_bytes = base64.b64decode(b64_str)
+                                    yield AudioRawFrame(
+                                        audio=audio_bytes,
+                                        sample_rate=self.sample_rate,
+                                        num_channels=1
+                                    )
+                            elif "text" in part:
+                                # Handle occasional fallback text modality if needed
+                                pass
+                except Exception as e:
+                    logger.error(f"Failed to parse Gemini API JSON response: {e}")
                             
         except Exception as e:
-            logger.exception(f"Exception in Gemini TTS streaming: {e}")
+            logger.exception(f"Exception in Gemini TTS API: {e}")
             yield ErrorFrame(error=str(e))
         finally:
             yield TTSStoppedFrame()
