@@ -27,6 +27,7 @@ class GeminiTTSService(TTSService):
         *,
         api_key: str,
         voice_name: str = "Zephyr",
+        voice_prompt: str = "",
         model: str = "gemini-2.5-flash-preview-tts",
         sample_rate: int = 24000,
         **kwargs,
@@ -34,6 +35,7 @@ class GeminiTTSService(TTSService):
         super().__init__(**kwargs)
         self.api_key = api_key
         self.voice_name = voice_name
+        self.voice_prompt = voice_prompt
         # Gemini expects 'models/' prefix but we will handle that in the URL
         self.model = model
         self.sample_rate = sample_rate
@@ -86,6 +88,11 @@ class GeminiTTSService(TTSService):
                     }
                 }
             }
+            
+            if self.voice_prompt:
+                payload["systemInstruction"] = {
+                    "parts": [{"text": self.voice_prompt}]
+                }
             
             async with self.session.post(uri, json=payload) as resp:
                 if resp.status != 200:

@@ -416,6 +416,10 @@ class GeminiTTSConfiguration(BaseTTSConfiguration):
     voice: str = Field(
         default="Zephyr", json_schema_extra={"examples": GEMINI_TTS_VOICES}
     )
+    voice_prompt: str = Field(
+        default="",
+        description="Natural language instruction for how the voice should sound (optional)."
+    )
     api_key: str
 
 
