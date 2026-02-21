@@ -2,6 +2,10 @@ import base64
 import json
 import asyncio
 import aiohttp
+import time
+import time
+import wave
+import io
 from typing import AsyncGenerator
 from loguru import logger
 
@@ -101,7 +105,12 @@ class GeminiTTSService(TTSService):
                 }
             }
             
+            
+            start_time = time.time()
             async with self.session.post(uri, json=payload) as resp:
+                headers_time = time.time()
+                logger.debug(f"Gemini TTS: HTTP Headers received in {headers_time - start_time:.3f}s")
+                
                 if resp.status != 200:
                     err_txt = await resp.text()
                     logger.error(f"Gemini TTS API error {resp.status}: {err_txt}")
@@ -109,9 +118,16 @@ class GeminiTTSService(TTSService):
                     return
 
                 # Read Server-Sent Events (SSE)
+                first_chunk_logged = False
+                first_audio_logged = False
                 async for line in resp.content:
                     if not line:
                         continue
+                        
+                    if not first_chunk_logged:
+                        first_chunk_logged = True
+                        logger.debug(f"Gemini TTS: First SSE chunk received in {time.time() - start_time:.3f}s")
+                        
                     line_str = line.decode('utf-8').strip()
                     if line_str.startswith("data: "):
                         json_str = line_str[6:].strip()
@@ -127,22 +143,32 @@ class GeminiTTSService(TTSService):
                                         b64_str = part["inlineData"].get("data")
                                         if b64_str:
                                             audio_bytes = base64.b64decode(b64_str)
-                                            # Pipecat and PyAV WebRTC transports can drop packets or stutter
-                                            # if given massive raw audio frames (e.g., 500KB or 10s of audio at once).
-                                            # We manually chunk the monolithic audio response into ~0.1s segments (4800 bytes at 24kHz 16-bit mono)
-                                            chunk_size = 4800 
-                                            for i in range(0, len(audio_bytes), chunk_size):
-                                                audio_chunk = audio_bytes[i:i+chunk_size]
-                                                frame_kwargs = {
-                                                    "audio": audio_chunk,
-                                                    "sample_rate": self.sample_rate,
-                                                    "num_channels": 1
-                                                }
-                                                if context_id is not None:
-                                                    frame_kwargs["context_id"] = context_id
-                                                
-                                                yield TTSAudioRawFrame(**frame_kwargs)
-                                                await asyncio.sleep(0) # Yield control to avoid blocking Event Loop on massive arrays
+                                            
+                                            if not first_audio_logged:
+                                                first_audio_logged = True
+                                                logger.debug(f"Gemini TTS: First Audio Byte decoded in {time.time() - start_time:.3f}s from start")
+                                            
+                                            # Gemini REST API returns WAV format (with RIFF headers).
+                                            # We must strip the 44-byte WAV header cleanly to avoid playing static chunks 
+                                            # and causing PyAV memory misalignment that drops downstream frames!
+                                            try:
+                                                with wave.open(io.BytesIO(audio_bytes), 'rb') as wav:
+                                                    raw_pcm = wav.readframes(wav.getnframes())
+                                            except Exception as e:
+                                                # Fallback if it's already RAW PCM
+                                                logger.warning(f"Could not parse WAV header, assuming raw PCM: {e}")
+                                                raw_pcm = audio_bytes
+
+                                            frame_kwargs = {
+                                                "audio": raw_pcm,
+                                                "sample_rate": self.sample_rate,
+                                                "num_channels": 1
+                                            }
+                                            if context_id is not None:
+                                                frame_kwargs["context_id"] = context_id
+                                            
+                                            # Yield the unified PCM to the Pipecat Audio buffer, letting internal pyAV handle timing securely
+                                            yield TTSAudioRawFrame(**frame_kwargs)
                         except Exception as e:
                             logger.error(f"Failed to parse Gemini SSE chunk: {e}")
                             
