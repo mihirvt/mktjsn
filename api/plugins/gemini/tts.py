@@ -45,7 +45,8 @@ class GeminiTTSService(TTSService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        self.session = aiohttp.ClientSession()
+        # Increase internal read buffer size because Gemini audio chunk Base64 strings can easily exceed the default 64KB aiohttp line length limit
+        self.session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(), read_bufsize=1048576)
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
