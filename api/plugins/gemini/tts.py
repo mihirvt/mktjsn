@@ -127,15 +127,22 @@ class GeminiTTSService(TTSService):
                                         b64_str = part["inlineData"].get("data")
                                         if b64_str:
                                             audio_bytes = base64.b64decode(b64_str)
-                                            frame_kwargs = {
-                                                "audio": audio_bytes,
-                                                "sample_rate": self.sample_rate,
-                                                "num_channels": 1
-                                            }
-                                            if context_id is not None:
-                                                frame_kwargs["context_id"] = context_id
-                                            
-                                            yield TTSAudioRawFrame(**frame_kwargs)
+                                            # Pipecat and PyAV WebRTC transports can drop packets or stutter
+                                            # if given massive raw audio frames (e.g., 500KB or 10s of audio at once).
+                                            # We manually chunk the monolithic audio response into ~0.1s segments (4800 bytes at 24kHz 16-bit mono)
+                                            chunk_size = 4800 
+                                            for i in range(0, len(audio_bytes), chunk_size):
+                                                audio_chunk = audio_bytes[i:i+chunk_size]
+                                                frame_kwargs = {
+                                                    "audio": audio_chunk,
+                                                    "sample_rate": self.sample_rate,
+                                                    "num_channels": 1
+                                                }
+                                                if context_id is not None:
+                                                    frame_kwargs["context_id"] = context_id
+                                                
+                                                yield TTSAudioRawFrame(**frame_kwargs)
+                                                await asyncio.sleep(0) # Yield control to avoid blocking Event Loop on massive arrays
                         except Exception as e:
                             logger.error(f"Failed to parse Gemini SSE chunk: {e}")
                             
