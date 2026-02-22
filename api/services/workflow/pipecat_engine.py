@@ -671,6 +671,19 @@ class PipecatEngine:
         """
         return engine_callbacks.create_generation_started_callback(self)
 
+    def create_error_frame_callback(self):
+        """
+        This callback handles any ErrorFrames from the pipeline and appends them to gathered context.
+        """
+        async def handle_error_frame(error_msg: str):
+            logger.error(f"Pipeline Error Frame received: {error_msg}")
+            # Append to gathered context so Call Logs can display the error
+            if "pipeline_errors" not in self._gathered_context:
+                self._gathered_context["pipeline_errors"] = []
+            self._gathered_context["pipeline_errors"].append(error_msg)
+            
+        return handle_error_frame
+
     def create_aggregation_correction_callback(self) -> Callable[[str], str]:
         """Create a callback that corrects corrupted aggregation using reference text."""
         return engine_callbacks.create_aggregation_correction_callback(self)

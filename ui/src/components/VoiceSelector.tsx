@@ -13,8 +13,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils";
 
 // Providers that have MPS voice endpoints
-type TTSProviderWithVoices = "elevenlabs" | "deepgram" | "sarvam" | "cartesia" | "dograh";
-const MPS_VOICE_PROVIDERS: TTSProviderWithVoices[] = ["elevenlabs", "deepgram", "sarvam", "cartesia", "dograh"];
+type TTSProviderWithVoices = "elevenlabs" | "deepgram" | "sarvam" | "cartesia" | "dograh" | "smallest_ai";
+const MPS_VOICE_PROVIDERS: TTSProviderWithVoices[] = ["elevenlabs", "deepgram", "sarvam", "cartesia", "dograh", "smallest_ai"];
 
 interface VoiceSelectorProps {
     provider: string;
@@ -52,6 +52,7 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
             sarvam: "sarvam",
             cartesia: "cartesia",
             dograh: "dograh",
+            smallest_ai: "smallest_ai",
         };
         return providerMap[providerName.toLowerCase()] || null;
     }, []);
@@ -338,7 +339,7 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
                                                     className={cn(
                                                         "h-4 w-4",
                                                         playingPreview === voice.voice_id &&
-                                                            "text-primary animate-pulse"
+                                                        "text-primary animate-pulse"
                                                     )}
                                                 />
                                             </Button>

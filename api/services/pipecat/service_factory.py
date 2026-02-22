@@ -21,9 +21,9 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.services.openai.tts import OpenAITTSService
 from pipecat.services.openrouter.llm import OpenRouterLLMService
-from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.services.sarvam.tts import SarvamTTSService
 from api.plugins.sarvam import SarvamLLMService
+from api.plugins.smallest_ai import SmallestAITTSService
 from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.text.xml_function_tag_filter import XMLFunctionTagFilter
@@ -236,6 +236,19 @@ def create_tts_service(user_config, audio_config: "AudioConfig"):
             voice_id=voice,
             params=SarvamTTSService.InputParams(language=pipecat_language),
             text_filters=[xml_function_tag_filter],
+        )
+    elif user_config.tts.provider == ServiceProviders.SMALLEST_AI.value:
+        voice = getattr(user_config.tts, "voice", None) or "ryan"
+        return SmallestAITTSService(
+            api_key=user_config.tts.api_key,
+            model=user_config.tts.model,
+            voice_id=voice,
+            sample_rate=audio_config.transport_out_sample_rate,
+            params=SmallestAITTSService.InputParams(
+                language=user_config.tts.language,
+                speed=user_config.tts.speed,
+                max_buffer_flush_ms=user_config.tts.max_buffer_flush_ms,
+            ),
         )
     else:
         raise HTTPException(

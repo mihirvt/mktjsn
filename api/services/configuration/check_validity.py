@@ -41,7 +41,6 @@ class UserConfigurationValidator:
             ServiceProviders.DOGRAH.value: self._check_dograh_api_key,
             ServiceProviders.SARVAM.value: self._check_sarvam_api_key,
             ServiceProviders.SPEECHMATICS.value: self._check_speechmatics_api_key,
-            ServiceProviders.GEMINI.value: self._check_gemini_api_key,
         }
 
     async def validate(self, configuration: UserConfiguration) -> APIKeyStatusResponse:
@@ -159,7 +158,4 @@ class UserConfigurationValidator:
         return True
 
     def _check_speechmatics_api_key(self, model: str, api_key: str) -> bool:
-        return True
-
-    def _check_gemini_api_key(self, model: str, api_key: str) -> bool:
         return True

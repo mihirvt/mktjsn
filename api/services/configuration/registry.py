@@ -24,7 +24,7 @@ class ServiceProviders(str, Enum):
     DOGRAH = "dograh"
     SARVAM = "sarvam"
     SPEECHMATICS = "speechmatics"
-    GEMINI = "gemini"
+    SMALLEST_AI = "smallest_ai"
 
 
 class BaseServiceConfiguration(BaseModel):
@@ -392,34 +392,24 @@ class SarvamTTSConfiguration(BaseTTSConfiguration):
     )
     api_key: str
 
-
-GEMINI_TTS_MODELS = [
-    "gemini-2.5-flash-preview-tts",
-    "gemini-2.5-flash-preview-tts-lite",
-    "gemini-2.5-pro-preview-tts",
-]
-GEMINI_TTS_VOICES = [
-    "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede", 
-    "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba", 
-    "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar", 
-    "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi", 
-    "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"
-]
+SMALLEST_AI_TTS_MODELS = ["lightning-v3.1", "lightning-v2"]
+SMALLEST_AI_LANGUAGES = ["en", "hi"]
 
 
 @register_tts
-class GeminiTTSConfiguration(BaseTTSConfiguration):
-    provider: Literal[ServiceProviders.GEMINI] = ServiceProviders.GEMINI
+class SmallestAITTSConfiguration(BaseTTSConfiguration):
+    provider: Literal[ServiceProviders.SMALLEST_AI] = ServiceProviders.SMALLEST_AI
     model: str = Field(
-        default="gemini-2.5-flash-preview-tts", json_schema_extra={"examples": GEMINI_TTS_MODELS}
+        default="lightning-v3.1", json_schema_extra={"examples": SMALLEST_AI_TTS_MODELS}
     )
     voice: str = Field(
-        default="Zephyr", json_schema_extra={"examples": GEMINI_TTS_VOICES}
+        default="ryan", description="Voice ID to use for TTS"
     )
-    voice_prompt: str = Field(
-        default="",
-        description="Natural language instruction for how the voice should sound (optional)."
+    language: str = Field(
+        default="en", json_schema_extra={"examples": SMALLEST_AI_LANGUAGES}
     )
+    speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    max_buffer_flush_ms: int = Field(default=0, ge=0)
     api_key: str
 
 
@@ -431,7 +421,7 @@ TTSConfig = Annotated[
         CartesiaTTSConfiguration,
         DograhTTSService,
         SarvamTTSConfiguration,
-        GeminiTTSConfiguration,
+        SmallestAITTSConfiguration,
     ],
     Field(discriminator="provider"),
 ]
