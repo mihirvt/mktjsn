@@ -24,7 +24,6 @@ from pipecat.services.openrouter.llm import OpenRouterLLMService
 from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.services.sarvam.tts import SarvamTTSService
 from api.plugins.sarvam import SarvamLLMService
-from api.plugins.gemini import GeminiTTSService
 from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.text.xml_function_tag_filter import XMLFunctionTagFilter
@@ -236,14 +235,6 @@ def create_tts_service(user_config, audio_config: "AudioConfig"):
             model=user_config.tts.model,
             voice_id=voice,
             params=SarvamTTSService.InputParams(language=pipecat_language),
-            text_filters=[xml_function_tag_filter],
-        )
-    elif user_config.tts.provider == ServiceProviders.GEMINI.value:
-        return GeminiTTSService(
-            api_key=user_config.tts.api_key,
-            model=user_config.tts.model,
-            voice_name=user_config.tts.voice,
-            voice_prompt=getattr(user_config.tts, "voice_prompt", ""),
             text_filters=[xml_function_tag_filter],
         )
     else:
