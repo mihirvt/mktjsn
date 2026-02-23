@@ -47,6 +47,72 @@ Coolify and Alpine Linux handle networking differently than a raw Ubuntu server.
 * **The Alpine IPv6 Trap:** In Alpine Linux, `localhost` resolves to an IPv6 `::1` address. Next.js natively binds to IPv4. Therefore, Docker healthchecks using `wget http://localhost:3010` **will fail**. Your Docker Compose health check must explicitly use `http://127.0.0.1:3010` or else Coolify will see the UI container as 'unhealthy' and sever public access.
 * **UI Server Binding:** In `ui/Dockerfile`, when running Next.js standalone, the command MUST specify `HOSTNAME=0.0.0.0` (e.g., `CMD sh -c "HOSTNAME=0.0.0.0 PORT=3010 node server.js"`). If omitted, Next.js blocks incoming public traffic.
 * **API Client Backend Discovery:** `dograh/upstream`'s `route.ts` API client blindly falls back to pulling from internal Docker networks (e.g. `http://api:8000`) and passes that string back to the user's web browser as `http://localhost:8000`, causing `CONNECTION_REFUSED` on login. In `ui/src/app/api/config/version/route.ts`, if the environment is a docker internal IP, the `clientApiBaseUrl` must be `null` so the browser gracefully falls back to `window.location.origin` without guessing port numbers.
+## 🔌 7. New Provider Integration Checklist
+
+Every time we integrate a new external service — LLM, TTS, STT, storage, webhook, anything — the same class of bugs bites us. This checklist is distilled from real debugging sessions. Use it **before** writing code, not after.
+
+### Step 0: Get a Working API Call First
+Before writing a single line of integration code, make a **standalone working call** to the provider's API (curl, Postman, or a throwaway Python script). Save the exact request and response. This is your ground truth.
+
+* Paste their official example payload as a comment at the top of your service file.
+* Note every field's **exact type**. APIs are picky — `1` (integer) and `true` (boolean) serialize differently in JSON, and a provider may silently reject the wrong type with zero error messages.
+* Confirm the **exact field names** the API returns (e.g. `voiceId` vs `voice_id`, `model_name` vs `modelName`). Never assume — always log the raw response.
+
+### Step 1: Trace the Full Data Flow
+Before debugging anything at the service layer, trace every user-facing value from the **UI** all the way to the **outgoing API payload**. Bugs hide at every hop:
+
+* **UI → Backend:** Is the UI sending the API's internal identifier (e.g. a lowercase slug) or the human display label? Many APIs are **case-sensitive** and will silently fail on wrong casing.
+* **Backend → Config DB:** Does the Pydantic model coerce the value? A `bool` field stores as JSON `false`, but the API might need integer `0`. A `str` field might store a full language name when the API needs an ISO code.
+* **Config DB → Service Constructor:** Do `getattr()` fallbacks use the correct defaults, or stale ones from a previous iteration?
+* **Service → API Payload:** Log the **full serialized JSON** right before sending. Compare it **field-by-field** against the working curl from Step 0. This single step would have caught every bug in our history.
+
+### Step 2: Understand Streaming & Protocol Semantics
+WebSocket, SSE, and streaming APIs have **control flags** that fundamentally change behavior:
+
+* Some APIs have "continue", "stream", or "partial" flags — setting them wrong means the API **buffers your input and waits forever** for more data, returning nothing. This creates the maddening symptom: "connection succeeds, payload sends, zero response."
+* Some APIs require explicit "flush", "end", or "close" signals, or they'll hold data in a buffer indefinitely.
+* **Rule of thumb:** If you're sending a complete, self-contained request (not a partial stream), make sure all flags tell the API "this is complete, process it now." Don't blindly set streaming flags to `true` without understanding what happens downstream.
+
+### Step 3: Match the Framework's Internal Signatures
+Our upstream framework (Pipecat) evolves between versions. Before writing any service class:
+
+* Check where the **base class** currently lives — modules get renamed between versions. Use try/except imports to support both old and new paths gracefully.
+* Check the **method signatures** of the base class you're extending. If the upstream added or changed a parameter, your override must match.
+* Symptom of a signature mismatch: `takes X positional arguments but Y were given`. Always inspect the parent class signature before writing your own.
+
+### Step 4: Type Discipline in Payloads
+Provider APIs are strict about JSON types even when their docs don't say so:
+
+| Python type | JSON output | Gotcha |
+|------------|-------------|--------|
+| `True` / `False` | `true` / `false` | Some APIs want `1` / `0` (integer) |
+| `1.0` (float) | `1.0` | Some APIs want `1` (no decimal) for certain fields |
+| `"Hindi"` | `"Hindi"` | API probably wants `"hi"` (ISO code) |
+
+* **Cast explicitly** in the payload builder: `int(...)`, `float(...)`, `.lower()`.
+* **Store API-native values** in config — language codes not display names, ID slugs not human labels.
+
+### Step 5: Silent Failures Are the Norm
+The most dangerous provider bugs produce **no error at all**:
+
+* Connection succeeds ✅, payload sends ✅, but zero response. This means your payload is **semantically** wrong (wrong types, wrong control flags, wrong identifier format), not syntactically broken. The provider accepted your JSON structure but quietly ignored it.
+* **Always log on every received message** (type, size, status). If you see zero received-message logs after a successful send, stop debugging your connection code — your payload semantics are wrong. Go back to Step 0 and compare field-by-field.
+
+### Step 6: Default Config Values Must Match Provider Docs
+When adding a new provider to `registry.py`:
+
+* Copy default values **exactly** from the provider's API docs example. Don't guess "reasonable" values — what seems reasonable may cause silent failure.
+* When you later fix defaults, remember that **existing user configs in the DB still have the old values**. Add migration logic in the Pydantic `model_validator` to convert legacy values on load (see `UserConfiguration.strip_deprecated_providers` for the pattern).
+
+### Step 7: API Response → UI Mapping
+When building dropdowns or selection lists from a provider's API:
+
+* **Never assume field names.** Always log the raw response first: `logger.debug(f"Raw API response: {data}")`.
+* Common mapping traps: camelCase vs snake_case, nested objects vs flat fields, arrays vs single strings.
+* What you store in config must be the **API's internal identifier**, not the display name the UI shows. The UI renders a human label; the config stores a machine slug.
+
 ---
 **SUMMARY:**
 When updating the app: Fetch from upstream -> `git rebase` -> Fix conflicts with isolated plugins -> Enforce RAM ceilings -> Check Database Migrations -> Force Deploy.
+
+When integrating a new provider: Get a working API call first → Log raw responses → Trace the full data flow → Match framework signatures → Cast types explicitly → Compare your full payload against docs → Check streaming/control flags.
