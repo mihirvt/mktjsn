@@ -139,7 +139,10 @@ class SmallestAITTSService(TTSService):
 
         self._current_context_id = context_id
         logger.debug(f"Smallest AI TTS request: '{text}' (context_id={context_id})")
-        await self._send_request(text=text, flush=False, continue_flag=True)
+        # continue=false: each run_tts call receives a complete sentence from the LLM
+        # aggregator. With continue=true the API buffers and waits for more text,
+        # never generating audio. With continue=false it synthesizes immediately.
+        await self._send_request(text=text, flush=False, continue_flag=False)
         yield None
 
     async def _send_request(self, text: str, flush: bool = False, continue_flag: bool = True):
