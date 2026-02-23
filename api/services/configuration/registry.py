@@ -410,6 +410,9 @@ class SmallestAITTSConfiguration(BaseTTSConfiguration):
     )
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
     max_buffer_flush_ms: int = Field(default=0, ge=0)
+    consistency: float = Field(default=1.0, ge=0.0, le=1.0)
+    enhancement: bool = Field(default=False)
+    similarity: float = Field(default=1.0, ge=0.0, le=1.0)
     api_key: str
 
 

@@ -248,6 +248,9 @@ def create_tts_service(user_config, audio_config: "AudioConfig"):
                 language=user_config.tts.language,
                 speed=user_config.tts.speed,
                 max_buffer_flush_ms=user_config.tts.max_buffer_flush_ms,
+                consistency=getattr(user_config.tts, "consistency", 1.0),
+                enhancement=getattr(user_config.tts, "enhancement", False),
+                similarity=getattr(user_config.tts, "similarity", 1.0),
             ),
         )
     else:

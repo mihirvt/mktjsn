@@ -27,10 +27,16 @@ class SmallestAITTSService(TTSService):
             language: str = "en",
             speed: float = 1.0,
             max_buffer_flush_ms: int = 0,
+            consistency: float = 1.0,
+            enhancement: bool = False,
+            similarity: float = 1.0,
         ):
             self.language = language
             self.speed = speed
             self.max_buffer_flush_ms = max_buffer_flush_ms
+            self.consistency = consistency
+            self.enhancement = enhancement
+            self.similarity = similarity
 
     def __init__(
         self,
@@ -145,6 +151,9 @@ class SmallestAITTSService(TTSService):
             "language": self._params.language,
             "sample_rate": self._sample_rate,
             "speed": self._params.speed,
+            "consistency": self._params.consistency,
+            "enhancement": self._params.enhancement,
+            "similarity": self._params.similarity,
         }
 
         try:
