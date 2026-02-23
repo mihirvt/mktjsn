@@ -6,7 +6,7 @@ from loguru import logger
 from api.constants import MPS_API_URL
 from api.services.configuration.registry import ServiceProviders
 from pipecat.services.azure.llm import AzureLLMService
-from pipecat.services.cartesia.stt import CartesiaSTTService
+from pipecat.services.cartesia.stt import CartesiaLiveOptions, CartesiaSTTService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
 from pipecat.services.deepgram.stt import DeepgramSTTService, LiveOptions
@@ -85,7 +85,12 @@ def create_stt_service(
         language = getattr(user_config.stt, "language", "hi") or "hi"
         return CartesiaSTTService(
             api_key=user_config.stt.api_key,
-            language=language,
+            live_options=CartesiaLiveOptions(
+                model=user_config.stt.model,
+                language=language,
+                encoding="pcm_s16le",
+                sample_rate=audio_config.transport_in_sample_rate,
+            ),
             sample_rate=audio_config.transport_in_sample_rate,
         )
     elif user_config.stt.provider == ServiceProviders.DOGRAH.value:
