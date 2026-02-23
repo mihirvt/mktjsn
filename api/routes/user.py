@@ -310,7 +310,7 @@ async def reactivate_api_key(
 
 
 # Voice Configuration Endpoints
-TTSProvider = Literal["elevenlabs", "deepgram", "sarvam", "cartesia", "dograh"]
+TTSProvider = Literal["elevenlabs", "deepgram", "sarvam", "cartesia", "dograh", "smallest_ai"]
 
 
 class VoiceInfo(BaseModel):
