@@ -393,7 +393,19 @@ class SarvamTTSConfiguration(BaseTTSConfiguration):
     api_key: str
 
 SMALLEST_AI_TTS_MODELS = ["lightning-v3.1", "lightning-v2"]
-SMALLEST_AI_LANGUAGES = ["en", "hi"]
+SMALLEST_AI_LANGUAGES = [
+    "en", "zh", "de", "es", "ru", "ko", "fr", "ja", "pt", "tr", "pl", "ca",
+    "nl", "ar", "sv", "it", "id", "hi", "fi", "vi", "he", "uk", "el", "ms",
+    "cs", "ro", "da", "hu", "ta", "no", "th", "ur", "hr", "bg", "lt", "la",
+    "mi", "ml", "cy", "sk", "te", "fa", "lv", "bn", "sr", "az", "sl", "kn",
+    "et", "mk", "br", "eu", "is", "hy", "ne", "mn", "bs", "kk", "sq", "sw",
+    "gl", "mr", "pa", "si", "km", "sn", "yo", "so", "af", "oc", "ka", "be",
+    "tg", "sd", "gu", "am", "yi", "lo", "uz", "fo", "ht", "ps", "tk", "nn",
+    "mt", "sa", "lb", "my", "bo", "tl", "mg", "as", "tt", "haw", "ln", "ha",
+    "ba", "jw", "su", "yue",
+]
+SMALLEST_AI_TELEPHONY_SAMPLE_RATES = [8000, 16000]
+SMALLEST_AI_WEB_SAMPLE_RATES = [8000, 16000, 22050, 44100]
 
 
 @register_tts
@@ -406,13 +418,23 @@ class SmallestAITTSConfiguration(BaseTTSConfiguration):
         default="ryan", description="Voice ID to use for TTS"
     )
     language: str = Field(
-        default="en", json_schema_extra={"examples": SMALLEST_AI_LANGUAGES}
+        default="hi", json_schema_extra={"examples": SMALLEST_AI_LANGUAGES}
     )
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
     max_buffer_flush_ms: int = Field(default=0, ge=0)
     consistency: float = Field(default=0.5, ge=0.0, le=1.0)
     enhancement: int = Field(default=1, ge=0, le=1)
     similarity: float = Field(default=0, ge=0.0, le=1.0)
+    telephony_sample_rate: int = Field(
+        default=8000,
+        json_schema_extra={"examples": SMALLEST_AI_TELEPHONY_SAMPLE_RATES},
+        description="Sample rate for telephony calls (8000 or 16000 Hz)"
+    )
+    web_sample_rate: int = Field(
+        default=16000,
+        json_schema_extra={"examples": SMALLEST_AI_WEB_SAMPLE_RATES},
+        description="Sample rate for web/WebRTC calls (up to 44100 Hz)"
+    )
     api_key: str
 
 
@@ -538,6 +560,17 @@ class DeepgramSTTConfiguration(BaseSTTConfiguration):
 
 
 CARTESIA_STT_MODELS = ["ink-whisper"]
+CARTESIA_STT_LANGUAGES = [
+    "en", "zh", "de", "es", "ru", "ko", "fr", "ja", "pt", "tr", "pl", "ca",
+    "nl", "ar", "sv", "it", "id", "hi", "fi", "vi", "he", "uk", "el", "ms",
+    "cs", "ro", "da", "hu", "ta", "no", "th", "ur", "hr", "bg", "lt", "la",
+    "mi", "ml", "cy", "sk", "te", "fa", "lv", "bn", "sr", "az", "sl", "kn",
+    "et", "mk", "br", "eu", "is", "hy", "ne", "mn", "bs", "kk", "sq", "sw",
+    "gl", "mr", "pa", "si", "km", "sn", "yo", "so", "af", "oc", "ka", "be",
+    "tg", "sd", "gu", "am", "yi", "lo", "uz", "fo", "ht", "ps", "tk", "nn",
+    "mt", "sa", "lb", "my", "bo", "tl", "mg", "as", "tt", "haw", "ln", "ha",
+    "ba", "jw", "su", "yue",
+]
 
 
 @register_stt
@@ -545,6 +578,9 @@ class CartesiaSTTConfiguration(BaseSTTConfiguration):
     provider: Literal[ServiceProviders.CARTESIA] = ServiceProviders.CARTESIA
     model: str = Field(
         default="ink-whisper", json_schema_extra={"examples": CARTESIA_STT_MODELS}
+    )
+    language: str = Field(
+        default="hi", json_schema_extra={"examples": CARTESIA_STT_LANGUAGES}
     )
     api_key: str
 

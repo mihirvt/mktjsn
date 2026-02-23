@@ -82,8 +82,10 @@ def create_stt_service(
             api_key=user_config.stt.api_key, model=user_config.stt.model
         )
     elif user_config.stt.provider == ServiceProviders.CARTESIA.value:
+        language = getattr(user_config.stt, "language", "hi") or "hi"
         return CartesiaSTTService(
             api_key=user_config.stt.api_key,
+            language=language,
             sample_rate=audio_config.transport_in_sample_rate,
         )
     elif user_config.stt.provider == ServiceProviders.DOGRAH.value:
@@ -239,11 +241,17 @@ def create_tts_service(user_config, audio_config: "AudioConfig"):
         )
     elif user_config.tts.provider == ServiceProviders.SMALLEST_AI.value:
         voice = getattr(user_config.tts, "voice", None) or "ryan"
+        # Use per-transport sample rate from user config, falling back to audio_config
+        is_telephony = audio_config.transport_out_sample_rate <= 8000
+        if is_telephony:
+            sample_rate = int(getattr(user_config.tts, "telephony_sample_rate", 8000) or 8000)
+        else:
+            sample_rate = int(getattr(user_config.tts, "web_sample_rate", 16000) or 16000)
         return SmallestAITTSService(
             api_key=user_config.tts.api_key,
             model=user_config.tts.model,
             voice_id=voice,
-            sample_rate=audio_config.transport_out_sample_rate,
+            sample_rate=sample_rate,
             params=SmallestAITTSService.InputParams(
                 language=user_config.tts.language,
                 speed=user_config.tts.speed,
