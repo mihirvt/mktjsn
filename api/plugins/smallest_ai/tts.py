@@ -90,11 +90,13 @@ class SmallestAITTSService(TTSService):
             
             logger.debug(f"Connecting to Smallest AI TTS WebSocket: {url}")
             self._ws = await self._session.ws_connect(url, headers=headers)
+            logger.info(f"Smallest AI TTS WebSocket connected successfully")
             
             # Start the background task to receive audio
             self._receive_task = asyncio.create_task(self._receive_audio())
+            logger.debug(f"Smallest AI TTS receive task started: {self._receive_task}")
         except Exception as e:
-            logger.error(f"Failed to connect to Smallest AI TTS: {e}")
+            logger.error(f"Failed to connect to Smallest AI TTS: {e}", exc_info=True)
             await self.push_frame(ErrorFrame(f"Smallest AI TTS Connection Error: {e}"))
 
     async def _disconnect(self):
@@ -161,20 +163,47 @@ class SmallestAITTSService(TTSService):
 
         try:
             await self._ws.send_json(payload)
+            logger.debug(f"Smallest AI payload sent: voice={payload['voice_id']}, text_len={len(payload['text'])}, sample_rate={payload['sample_rate']}, flush={payload['flush']}")
         except Exception as e:
-            logger.error(f"Error sending payload to Smallest AI: {e}")
+            logger.error(f"Error sending payload to Smallest AI: {e}", exc_info=True)
             await self.push_frame(ErrorFrame(f"Smallest AI Synthesis Error: {e}"))
 
     async def _receive_audio(self):
         """Background task to continuously receive audio chunks from WebSocket."""
+        logger.debug("Smallest AI TTS receive task started")
         try:
             while self._ws and not self._ws.closed:
                 msg = await self._ws.receive()
-                if msg.type == aiohttp.WSMsgType.TEXT:
+                logger.debug(f"Smallest AI WS msg type: {msg.type}")
+
+                if msg.type == aiohttp.WSMsgType.BINARY:
+                    # Raw binary PCM audio data
+                    audio_bytes = msg.data
+                    if audio_bytes:
+                        logger.debug(f"Smallest AI received binary audio chunk: {len(audio_bytes)} bytes")
+                        frame_kwargs = {
+                            "audio": audio_bytes,
+                            "sample_rate": self._sample_rate,
+                            "num_channels": 1,
+                        }
+                        if self._current_context_id:
+                            frame_kwargs["context_id"] = self._current_context_id
+                        try:
+                            frame = TTSAudioRawFrame(**frame_kwargs)
+                        except TypeError:
+                            frame = TTSAudioRawFrame(
+                                audio=audio_bytes,
+                                sample_rate=self._sample_rate,
+                                num_channels=1
+                            )
+                        await self.push_frame(frame)
+
+                elif msg.type == aiohttp.WSMsgType.TEXT:
                     response = json.loads(msg.data)
+                    logger.debug(f"Smallest AI WS text response keys: {list(response.keys())}, status={response.get('status')}")
                     
                     if "error" in response:
-                        error_msg = response.get("message", "Unknown error")
+                        error_msg = response.get("message", response.get("error", "Unknown error"))
                         logger.error(f"Smallest AI TTS Error: {error_msg}")
                         await self.push_frame(ErrorFrame(f"Smallest AI TTS Error: {error_msg}"))
                         continue
@@ -184,9 +213,8 @@ class SmallestAITTSService(TTSService):
                         data = response.get("data", {})
                         audio_b64 = data.get("audio")
                         if audio_b64:
-                            # Decode base64 to raw PCM
                             audio_bytes = base64.b64decode(audio_b64)
-                            # Push raw audio frame using Pipecat's frame standard
+                            logger.debug(f"Smallest AI received b64 audio chunk: {len(audio_bytes)} bytes")
                             frame_kwargs = {
                                 "audio": audio_bytes,
                                 "sample_rate": self._sample_rate,
@@ -197,21 +225,27 @@ class SmallestAITTSService(TTSService):
                             try:
                                 frame = TTSAudioRawFrame(**frame_kwargs)
                             except TypeError:
-                                # Fallback if context_id is not supported
                                 frame = TTSAudioRawFrame(
                                     audio=audio_bytes,
                                     sample_rate=self._sample_rate,
                                     num_channels=1
                                 )
                             await self.push_frame(frame)
+                        else:
+                            logger.warning(f"Smallest AI chunk without audio data: {list(data.keys())}")
                     
                     elif status == "complete":
                         logger.debug(f"Smallest AI TTS complete for request {response.get('request_id')}")
+                    else:
+                        logger.debug(f"Smallest AI WS unknown status: {status}, full response: {str(response)[:200]}")
                         
                 elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                    logger.warning(f"Smallest AI WS connection closed/error: type={msg.type}")
                     break
+                else:
+                    logger.debug(f"Smallest AI WS unhandled msg type: {msg.type}")
         except asyncio.CancelledError:
-            pass
+            logger.debug("Smallest AI receive task cancelled")
         except Exception as e:
-            logger.error(f"Smallest AI receive task error: {e}")
+            logger.error(f"Smallest AI receive task error: {e}", exc_info=True)
             await self.push_frame(ErrorFrame(f"Smallest AI TTS Stream Error: {e}"))
