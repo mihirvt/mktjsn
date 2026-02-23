@@ -14,6 +14,7 @@ from pipecat.frames.frames import (
     StartInterruptionFrame,
     TTSAudioRawFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import TTSService
 
 class SmallestAITTSService(TTSService):
@@ -113,15 +114,15 @@ class SmallestAITTSService(TTSService):
             await self._session.close()
             self._session = None
 
-    async def process_frame(self, frame: Frame):
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames from the pipeline."""
         if isinstance(frame, StartInterruptionFrame):
             logger.debug("TTS Interruption received. Flushing...")
             # We want to clear our internal buffers and tell the WS to flush
             await self._send_request(text="", flush=True)
-            await self.push_frame(frame)
+            await self.push_frame(frame, direction)
         else:
-            await super().process_frame(frame)
+            await super().process_frame(frame, direction)
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Send text to the TTS service."""

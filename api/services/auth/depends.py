@@ -96,8 +96,8 @@ async def get_user(
             # This prevents race conditions where multiple concurrent requests
             # might try to create configurations
             if org_was_created:
-                existing_cfg = await db_client.get_user_configurations(user_model.id)
-                if not (existing_cfg.llm or existing_cfg.tts or existing_cfg.stt):
+                has_config = await db_client.has_user_configuration(user_model.id)
+                if not has_config:
                     mps_config = await create_user_configuration_with_mps_key(
                         user_model.id, organization.id, stack_user["id"]
                     )

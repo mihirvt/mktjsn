@@ -58,6 +58,16 @@ class UserClient(BaseDBClient):
             )
             return result.scalars().first()
 
+    async def has_user_configuration(self, user_id: int) -> bool:
+        """Check if a physical user configuration record exists in the database."""
+        async with self.async_session() as session:
+            result = await session.execute(
+                select(UserConfigurationModel).where(
+                    UserConfigurationModel.user_id == user_id
+                )
+            )
+            return result.scalars().first() is not None
+
     async def get_user_configurations(self, user_id: int) -> UserConfiguration:
         async with self.async_session() as session:
             result = await session.execute(

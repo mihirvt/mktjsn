@@ -87,7 +87,10 @@ async def get_user_configurations(
     user_configurations = await db_client.get_user_configurations(user.id)
     
     # Auto-provision if user signed up while MPS configuration generation was crashed
-    if not (user_configurations.llm or user_configurations.tts or user_configurations.stt):
+    # IMPORTANT: Use has_user_configuration rather than checking for empty fields 
+    # to avoid overwriting existing configs that failed Pydantic validation!
+    has_config = await db_client.has_user_configuration(user.id)
+    if not has_config:
         from api.services.auth.depends import create_user_configuration_with_mps_key
         try:
             mps_config = await create_user_configuration_with_mps_key(
@@ -121,7 +124,10 @@ async def update_user_configurations(
     existing_config = await db_client.get_user_configurations(user.id)
 
     # Auto-provision if user signed up while MPS configuration generation was crashed
-    if not (existing_config.llm or existing_config.tts or existing_config.stt):
+    # IMPORTANT: Use has_user_configuration rather than checking for empty fields 
+    # to avoid overwriting existing configs that failed Pydantic validation!
+    has_config = await db_client.has_user_configuration(user.id)
+    if not has_config:
         from api.services.auth.depends import create_user_configuration_with_mps_key
         try:
             mps_config = await create_user_configuration_with_mps_key(
@@ -335,6 +341,37 @@ async def get_voices(
 ) -> VoicesResponse:
     """Get available voices for a TTS provider."""
     try:
+        if provider == "smallest_ai":
+            user_config = await db_client.get_user_configurations(user.id)
+            api_key = None
+            if user_config.tts:
+                provider_val = user_config.tts.provider.value if hasattr(user_config.tts.provider, "value") else user_config.tts.provider
+                if provider_val == "smallest_ai":
+                    api_key = getattr(user_config.tts, "api_key", None)
+            
+            if not api_key:
+                 return VoicesResponse(provider="smallest_ai", voices=[])
+                 
+            import httpx
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                res = await client.get(
+                    "https://waves-api.smallest.ai/api/v1/lightning-v3.1/get_voices",
+                    headers={"Authorization": f"Bearer {api_key}"}
+                )
+                if res.status_code == 200:
+                    data = res.json()
+                    voice_list = data if isinstance(data, list) else data.get("voices", [])
+                    voices = [
+                        VoiceInfo(
+                            voice_id=v.get("id", v.get("voice_id", "Unknown")),
+                            name=v.get("name", "Unknown Voice")
+                        ) for v in voice_list
+                    ]
+                    return VoicesResponse(provider="smallest_ai", voices=voices)
+                else:
+                    logger.error(f"Failed to fetch Smallest.ai voices: {res.status_code} {res.text}")
+                    return VoicesResponse(provider="smallest_ai", voices=[])
+
         result = await mps_service_key_client.get_voices(
             provider=provider,
             organization_id=user.selected_organization_id,
