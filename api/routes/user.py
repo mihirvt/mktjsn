@@ -361,12 +361,17 @@ async def get_voices(
                 if res.status_code == 200:
                     data = res.json()
                     voice_list = data if isinstance(data, list) else data.get("voices", [])
-                    voices = [
-                        VoiceInfo(
-                            voice_id=v.get("id", v.get("voice_id", "Unknown")),
-                            name=v.get("name", "Unknown Voice")
-                        ) for v in voice_list
-                    ]
+                    voices = []
+                    for v in voice_list:
+                        tags = v.get("tags", {})
+                        languages = tags.get("language", [])
+                        voices.append(VoiceInfo(
+                            voice_id=v.get("voiceId", v.get("voice_id", "unknown")),
+                            name=v.get("displayName", v.get("name", "Unknown Voice")),
+                            gender=tags.get("gender"),
+                            accent=tags.get("accent"),
+                            language=", ".join(languages) if isinstance(languages, list) else languages,
+                        ))
                     return VoicesResponse(provider="smallest_ai", voices=voices)
                 else:
                     logger.error(f"Failed to fetch Smallest.ai voices: {res.status_code} {res.text}")

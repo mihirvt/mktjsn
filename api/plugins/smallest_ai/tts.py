@@ -62,6 +62,7 @@ class SmallestAITTSService(TTSService):
         self._session: Optional[aiohttp.ClientSession] = None
         self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self._receive_task: Optional[asyncio.Task] = None
+        self._current_context_id: Optional[str] = None
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -124,14 +125,15 @@ class SmallestAITTSService(TTSService):
         else:
             await super().process_frame(frame, direction)
 
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: Optional[str] = None, **kwargs) -> AsyncGenerator[Frame, None]:
         """Send text to the TTS service."""
         # This is where Pipecat hands us completed sentences from aggregate TextFrames
         if not text.strip():
             yield None
             return
 
-        logger.debug(f"Smallest AI TTS request: '{text}'")
+        self._current_context_id = context_id
+        logger.debug(f"Smallest AI TTS request: '{text}' (context_id={context_id})")
         await self._send_request(text=text, flush=False, continue_flag=True)
         yield None
 
@@ -185,11 +187,22 @@ class SmallestAITTSService(TTSService):
                             # Decode base64 to raw PCM
                             audio_bytes = base64.b64decode(audio_b64)
                             # Push raw audio frame using Pipecat's frame standard
-                            frame = TTSAudioRawFrame(
-                                audio=audio_bytes,
-                                sample_rate=self._sample_rate,
-                                num_channels=1
-                            )
+                            frame_kwargs = {
+                                "audio": audio_bytes,
+                                "sample_rate": self._sample_rate,
+                                "num_channels": 1,
+                            }
+                            if self._current_context_id:
+                                frame_kwargs["context_id"] = self._current_context_id
+                            try:
+                                frame = TTSAudioRawFrame(**frame_kwargs)
+                            except TypeError:
+                                # Fallback if context_id is not supported
+                                frame = TTSAudioRawFrame(
+                                    audio=audio_bytes,
+                                    sample_rate=self._sample_rate,
+                                    num_channels=1
+                                )
                             await self.push_frame(frame)
                     
                     elif status == "complete":
