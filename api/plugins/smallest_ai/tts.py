@@ -15,7 +15,10 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import TTSService
+try:
+    from pipecat.services.tts_service import TTSService
+except ImportError:
+    from pipecat.services.ai_services import TTSService
 
 class SmallestAITTSService(TTSService):
     """
@@ -28,9 +31,9 @@ class SmallestAITTSService(TTSService):
             language: str = "en",
             speed: float = 1.0,
             max_buffer_flush_ms: int = 0,
-            consistency: float = 1.0,
-            enhancement: bool = False,
-            similarity: float = 1.0,
+            consistency: float = 0.5,
+            enhancement: int = 1,
+            similarity: float = 0,
         ):
             self.language = language
             self.speed = speed
@@ -156,14 +159,15 @@ class SmallestAITTSService(TTSService):
             "language": self._params.language,
             "sample_rate": self._sample_rate,
             "speed": self._params.speed,
-            "consistency": self._params.consistency,
-            "enhancement": self._params.enhancement,
-            "similarity": self._params.similarity,
+            "consistency": float(self._params.consistency),
+            "enhancement": int(self._params.enhancement),  # API expects integer 0/1, not boolean
+            "similarity": float(self._params.similarity),
         }
 
         try:
+            logger.debug(f"Smallest AI sending payload: {json.dumps(payload)[:300]}")
             await self._ws.send_json(payload)
-            logger.debug(f"Smallest AI payload sent: voice={payload['voice_id']}, text_len={len(payload['text'])}, sample_rate={payload['sample_rate']}, flush={payload['flush']}")
+            logger.debug(f"Smallest AI payload sent successfully")
         except Exception as e:
             logger.error(f"Error sending payload to Smallest AI: {e}", exc_info=True)
             await self.push_frame(ErrorFrame(f"Smallest AI Synthesis Error: {e}"))

@@ -30,4 +30,9 @@ class UserConfiguration(BaseModel):
                         # If a legacy 'gemini' provider is found, remove it so it doesn't break Pydantic validation
                         # The system will automatically fall back to the defaults instead of crashing
                         data[service] = None
+            # Convert boolean enhancement to int for smallest_ai TTS configs
+            if "tts" in data and isinstance(data.get("tts"), dict):
+                enhancement = data["tts"].get("enhancement")
+                if isinstance(enhancement, bool):
+                    data["tts"]["enhancement"] = int(enhancement)
         return data
