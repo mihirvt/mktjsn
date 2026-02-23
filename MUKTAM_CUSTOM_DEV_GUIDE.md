@@ -47,7 +47,46 @@ Coolify and Alpine Linux handle networking differently than a raw Ubuntu server.
 * **The Alpine IPv6 Trap:** In Alpine Linux, `localhost` resolves to an IPv6 `::1` address. Next.js natively binds to IPv4. Therefore, Docker healthchecks using `wget http://localhost:3010` **will fail**. Your Docker Compose health check must explicitly use `http://127.0.0.1:3010` or else Coolify will see the UI container as 'unhealthy' and sever public access.
 * **UI Server Binding:** In `ui/Dockerfile`, when running Next.js standalone, the command MUST specify `HOSTNAME=0.0.0.0` (e.g., `CMD sh -c "HOSTNAME=0.0.0.0 PORT=3010 node server.js"`). If omitted, Next.js blocks incoming public traffic.
 * **API Client Backend Discovery:** `dograh/upstream`'s `route.ts` API client blindly falls back to pulling from internal Docker networks (e.g. `http://api:8000`) and passes that string back to the user's web browser as `http://localhost:8000`, causing `CONNECTION_REFUSED` on login. In `ui/src/app/api/config/version/route.ts`, if the environment is a docker internal IP, the `clientApiBaseUrl` must be `null` so the browser gracefully falls back to `window.location.origin` without guessing port numbers.
-## 🔌 7. New Provider Integration Checklist
+
+## ⚠️ 7. Coolify Proxy Route Loss (The "Gateway Timeout After Every Deploy" Bug)
+
+**This is a known Coolify bug.** Every time you redeploy, Coolify's Traefik proxy has a race condition where it may lose its routing config for your containers. External traffic gets a `504 Gateway Timeout`. The UI still appears to work because the Next.js UI server calls the API via the **internal Docker network** (`http://api:8000`), bypassing Traefik entirely — so you won't notice the bug from the UI.
+
+### How to detect it:
+```bash
+curl -sf "https://base-api.muktam.online/api/v1/health"
+# If this returns 504, the proxy has lost the route. If 200, you're fine.
+```
+
+Also visible in logs: API logs only show `127.0.0.1` (docker healthchecks), zero requests from `10.0.3.x` (external via proxy).
+
+### Immediate fix:
+```bash
+docker restart coolify-proxy
+```
+
+### Permanent fix — Auto-restart proxy after route loss (add to server crontab):
+```bash
+crontab -e
+# Add this line — checks every 5 minutes, restarts proxy if health fails:
+*/5 * * * * curl -sf --max-time 10 "https://base-api.muktam.online/api/v1/health" > /dev/null || (docker restart coolify-proxy && echo "$(date): Proxy restarted due to 504" >> /var/log/proxy-watchdog.log)
+```
+
+After adding the cron job, confirm it's active:
+```bash
+crontab -l
+```
+
+### Why does this happen?
+When Coolify recreates a container during deploy, it sends Docker events to Traefik to update routing. Due to timing issues (container starts up before Traefik processes the event, or network reconnection hiccups), Traefik loses the backend and starts returning 504. Restarting the proxy forces it to re-scan all running containers and rebuild its routing table.
+
+### After every redeploy — manual checklist:
+1. Wait ~60s for containers to be healthy
+2. Run `curl -sf "https://base-api.muktam.online/api/v1/health"` 
+3. If 504 → `docker restart coolify-proxy`
+4. Wait 10s → test again
+
+## 🔌 8. New Provider Integration Checklist
 
 Every time we integrate a new external service — LLM, TTS, STT, storage, webhook, anything — the same class of bugs bites us. This checklist is distilled from real debugging sessions. Use it **before** writing code, not after.
 

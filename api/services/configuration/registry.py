@@ -637,6 +637,7 @@ class SpeechmaticsSTTConfiguration(BaseSTTConfiguration):
 STTConfig = Annotated[
     Union[
         DeepgramSTTConfiguration,
+        CartesiaSTTConfiguration,
         OpenAISTTConfiguration,
         DograhSTTService,
         SpeechmaticsSTTConfiguration,
