@@ -1,0 +1,24 @@
+# Lightning v3.1 WebSocket
+
+The Lightning v3.1 WebSocket API provides real-time text-to-speech streaming capabilities with natural, expressive voice synthesis. This API uses WebSocket to deliver audio chunks as they’re generated, enabling low-latency audio playback without waiting for the entire audio file to process.
+
+```
+{ "voice_id": "ryan", "text": "Hello, this is a sample text to convert to speech.", "max_buffer_flush_ms": 0, "continue": false, "flush": false, "language": "en", "sample_rate": 24000, "speed": 1, "consistency": 0.5, "enhancement": 1, "similarity": 0}
+```
+
+
+```
+{ "voice_id": "ryan", "text": "Hello, this is a sample text to convert to speech.", "max_buffer_flush_ms": 0, "continue": false, "flush": false, "language": "en", "sample_rate": 24000, "speed": 1, "consistency": 0.5, "enhancement": 1, "similarity": 0}
+```
+
+
+```
+{ "request_id": "<string>", "status": "<string>", "data": { "audio": "<string>" }}
+```
+
+
+```
+{ "request_id": "<string>", "status": "<string>", "data": { "audio": "<string>" }}
+```
+
+Bearer token authentication
