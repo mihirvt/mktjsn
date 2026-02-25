@@ -23,6 +23,7 @@ from pipecat.services.openai.tts import OpenAITTSService
 from pipecat.services.openrouter.llm import OpenRouterLLMService
 from pipecat.services.sarvam.tts import SarvamTTSService
 from api.plugins.sarvam import SarvamLLMService
+from api.plugins.deepinfra import DeepInfraLLMService
 from api.plugins.smallest_ai import SmallestAITTSService
 from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
 from pipecat.transcriptions.language import Language
@@ -335,6 +336,19 @@ def create_llm_service(user_config):
             api_key=user_config.llm.api_key,
             model=model,
             params=OpenAILLMService.InputParams(temperature=0.1),
+        )
+    elif user_config.llm.provider == ServiceProviders.DEEPINFRA.value:
+        reasoning_effort = getattr(user_config.llm, "reasoning_effort", "none") or "none"
+        extra = {}
+        if reasoning_effort != "none":
+            extra["reasoning_effort"] = reasoning_effort
+        return DeepInfraLLMService(
+            api_key=user_config.llm.api_key,
+            model=model,
+            params=OpenAILLMService.InputParams(
+                temperature=0.1,
+                extra=extra if extra else {},
+            ),
         )
     else:
         raise HTTPException(status_code=400, detail="Invalid LLM provider")

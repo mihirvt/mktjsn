@@ -25,6 +25,7 @@ class ServiceProviders(str, Enum):
     SARVAM = "sarvam"
     SPEECHMATICS = "speechmatics"
     SMALLEST_AI = "smallest_ai"
+    DEEPINFRA = "deepinfra"
 
 
 class BaseServiceConfiguration(BaseModel):
@@ -37,6 +38,7 @@ class BaseServiceConfiguration(BaseModel):
         ServiceProviders.GOOGLE,
         ServiceProviders.AZURE,
         ServiceProviders.DOGRAH,
+        ServiceProviders.DEEPINFRA,
         # ServiceProviders.SARVAM,
     ]
     api_key: str
@@ -213,6 +215,30 @@ class SarvamLLMService(BaseLLMConfiguration):
     api_key: str
 
 
+DEEPINFRA_LLM_MODELS = [
+    "moonshotai/Kimi-K2.5",
+    "meta-llama/Llama-4-Maverick-17B-128E-Instruct",
+    "deepseek-ai/DeepSeek-V3",
+    "Qwen/Qwen3-235B-A22B",
+    "google/gemma-3-27b-it",
+]
+DEEPINFRA_REASONING_EFFORTS = ["none", "low", "medium", "high"]
+
+
+@register_llm
+class DeepInfraLLMConfiguration(BaseLLMConfiguration):
+    provider: Literal[ServiceProviders.DEEPINFRA] = ServiceProviders.DEEPINFRA
+    model: str = Field(
+        default="moonshotai/Kimi-K2.5",
+        json_schema_extra={"examples": DEEPINFRA_LLM_MODELS},
+    )
+    reasoning_effort: str = Field(
+        default="none",
+        json_schema_extra={"examples": DEEPINFRA_REASONING_EFFORTS},
+    )
+    api_key: str
+
+
 LLMConfig = Annotated[
     Union[
         OpenAILLMService,
@@ -222,6 +248,7 @@ LLMConfig = Annotated[
         AzureLLMService,
         DograhLLMService,
         SarvamLLMService,
+        DeepInfraLLMConfiguration,
     ],
     Field(discriminator="provider"),
 ]
