@@ -35,4 +35,26 @@ class UserConfiguration(BaseModel):
                 enhancement = data["tts"].get("enhancement")
                 if isinstance(enhancement, bool):
                     data["tts"]["enhancement"] = int(enhancement)
+
+            # Coerce numeric fields that the UI may send as strings or NaN.
+            # HTML form inputs produce strings; empty inputs produce "" which
+            # fail Pydantic's ge/le float constraints.
+            for service in ["llm", "tts", "stt"]:
+                cfg = data.get(service)
+                if not isinstance(cfg, dict):
+                    continue
+                for key, val in list(cfg.items()):
+                    if isinstance(val, str) and key not in ("provider", "api_key", "model",
+                            "voice", "language", "base_url", "reasoning_effort",
+                            "operating_point"):
+                        try:
+                            cfg[key] = float(val) if val else None
+                        except (ValueError, TypeError):
+                            pass
+                    # Remove None / NaN values so Pydantic uses field defaults
+                    if cfg.get(key) is None:
+                        cfg.pop(key, None)
+                    elif isinstance(cfg.get(key), float) and cfg[key] != cfg[key]:
+                        # NaN check (NaN != NaN)
+                        cfg.pop(key, None)
         return data
