@@ -339,6 +339,7 @@ def create_llm_service(user_config):
         )
     elif user_config.llm.provider == ServiceProviders.DEEPINFRA.value:
         reasoning_effort = getattr(user_config.llm, "reasoning_effort", "none") or "none"
+        temperature = getattr(user_config.llm, "temperature", 0.1) or 0.1
         extra = {}
         if reasoning_effort != "none":
             extra["reasoning_effort"] = reasoning_effort
@@ -346,7 +347,7 @@ def create_llm_service(user_config):
             api_key=user_config.llm.api_key,
             model=model,
             params=OpenAILLMService.InputParams(
-                temperature=0.1,
+                temperature=temperature,
                 extra=extra if extra else {},
             ),
         )

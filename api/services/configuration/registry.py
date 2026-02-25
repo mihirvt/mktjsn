@@ -232,6 +232,10 @@ class DeepInfraLLMConfiguration(BaseLLMConfiguration):
         default="moonshotai/Kimi-K2.5",
         json_schema_extra={"examples": DEEPINFRA_LLM_MODELS},
     )
+    temperature: float = Field(
+        default=0.1, ge=0.0, le=2.0,
+        description="Sampling temperature (0 = focused, 2 = creative)",
+    )
     reasoning_effort: str = Field(
         default="none",
         json_schema_extra={"examples": DEEPINFRA_REASONING_EFFORTS},
