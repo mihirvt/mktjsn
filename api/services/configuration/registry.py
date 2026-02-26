@@ -163,6 +163,7 @@ class GoogleLLMService(BaseLLMConfiguration):
         default="gemini-2.0-flash", json_schema_extra={"examples": GOOGLE_MODELS}
     )
     api_key: str
+    temperature: Union[float, None] = Field(default=0.1)
 
 
 @register_llm
