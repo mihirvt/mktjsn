@@ -322,7 +322,17 @@ class DograhTTSService(BaseTTSConfiguration):
     api_key: str
 
 
-CARTESIA_TTS_MODELS = ["sonic-3"]
+CARTESIA_TTS_MODELS = ["sonic-3", "sonic-2.1", "sonic-english", "sonic-multilingual"]
+
+CARTESIA_EMOTIONS = [
+    "neutral",
+    "calm",
+    "angry",
+    "excited",
+    "content",
+    "sad",
+    "scared",
+]
 
 
 @register_tts
@@ -332,6 +342,19 @@ class CartesiaTTSConfiguration(BaseTTSConfiguration):
         default="sonic-3", json_schema_extra={"examples": CARTESIA_TTS_MODELS}
     )
     voice: str = Field(default="a167e0f3-df7e-4d52-a9c3-f949145571bd")
+    emotion: str = Field(
+        default="neutral", json_schema_extra={"examples": CARTESIA_EMOTIONS}
+    )
+    telephony_sample_rate: int = Field(
+        default=16000,
+        json_schema_extra={"examples": [8000, 16000]},
+        description="Sample rate for telephony calls (8000 or 16000 Hz)",
+    )
+    web_sample_rate: int = Field(
+        default=44100,
+        json_schema_extra={"examples": [16000, 22050, 44100]},
+        description="Sample rate for web/WebRTC calls (up to 44100 Hz)",
+    )
     api_key: str
 
 

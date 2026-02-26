@@ -25,6 +25,7 @@ from pipecat.services.sarvam.tts import SarvamTTSService
 from api.plugins.sarvam import SarvamLLMService
 from api.plugins.deepinfra import DeepInfraLLMService
 from api.plugins.smallest_ai import SmallestAITTSService
+from api.plugins.cartesia.tts import create_cartesia_tts
 from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.text.xml_function_tag_filter import XMLFunctionTagFilter
@@ -202,12 +203,25 @@ def create_tts_service(user_config, audio_config: "AudioConfig"):
             text_filters=[xml_function_tag_filter],
         )
     elif user_config.tts.provider == ServiceProviders.CARTESIA.value:
-        return CartesiaTTSService(
-            api_key=user_config.tts.api_key,
-            voice_id=user_config.tts.voice,
-            model=user_config.tts.model,
-            text_filters=[xml_function_tag_filter],
-        )
+        try:
+            service = create_cartesia_tts(user_config, audio_config)
+            if service:
+                return service
+            
+            # Fallback to standard Pipecat Cartesia service if plugin logic returned None
+            from pipecat.services.cartesia.tts import CartesiaTTSService
+            return CartesiaTTSService(
+                api_key=user_config.tts.api_key,
+                voice_id=user_config.tts.voice,
+                model=user_config.tts.model,
+                text_filters=[xml_function_tag_filter],
+            )
+        except ImportError:
+            logger.error("Cartesia SDK not found. Call will fail. Please install: pip install 'pipecat-ai[cartesia]'")
+            raise
+        except Exception as e:
+            logger.error(f"Failed to initialize Cartesia TTS: {e}")
+            raise
     elif user_config.tts.provider == ServiceProviders.DOGRAH.value:
         # Convert HTTP URL to WebSocket URL for TTS
         base_url = MPS_API_URL.replace("http://", "ws://").replace("https://", "wss://")

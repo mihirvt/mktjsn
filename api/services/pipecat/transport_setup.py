@@ -25,6 +25,24 @@ librnnoise_path = os.path.normpath(
 )
 
 
+def _get_ambience_mixer(audio_config: AudioConfig, config: dict | None):
+    if not config or not config.get("enabled", False):
+        return SilenceAudioMixer()
+
+    sample_rate = audio_config.transport_out_sample_rate
+    ambience_path = (
+        APP_ROOT_DIR / "assets" / f"office-ambience-{sample_rate}-mono.wav"
+    )
+    if not os.path.exists(ambience_path):
+        ambience_path = APP_ROOT_DIR / "assets" / "office-ambience-16000-mono.wav"
+
+    return SoundfileMixer(
+        sound_files={"office": ambience_path},
+        default_sound="office",
+        volume=config.get("volume", 0.3),
+    )
+
+
 async def create_twilio_transport(
     websocket_client: WebSocket,
     stream_sid: str,
@@ -69,19 +87,7 @@ async def create_twilio_transport(
             audio_out_enabled=True,
             audio_in_sample_rate=audio_config.transport_in_sample_rate,
             audio_out_sample_rate=audio_config.transport_out_sample_rate,
-            audio_out_mixer=(
-                SoundfileMixer(
-                    sound_files={
-                        "office": APP_ROOT_DIR
-                        / "assets"
-                        / f"office-ambience-{audio_config.transport_out_sample_rate}-mono.wav"
-                    },
-                    default_sound="office",
-                    volume=ambient_noise_config.get("volume", 0.3),
-                )
-                if ambient_noise_config and ambient_noise_config.get("enabled", False)
-                else SilenceAudioMixer()
-            ),
+            audio_out_mixer=_get_ambience_mixer(audio_config, ambient_noise_config),
             serializer=serializer,
         ),
     )
@@ -132,19 +138,7 @@ async def create_cloudonix_transport(
             audio_out_enabled=True,
             audio_in_sample_rate=audio_config.transport_in_sample_rate,
             audio_out_sample_rate=audio_config.transport_out_sample_rate,
-            audio_out_mixer=(
-                SoundfileMixer(
-                    sound_files={
-                        "office": APP_ROOT_DIR
-                        / "assets"
-                        / f"office-ambience-{audio_config.transport_out_sample_rate}-mono.wav"
-                    },
-                    default_sound="office",
-                    volume=ambient_noise_config.get("volume", 0.3),
-                )
-                if ambient_noise_config and ambient_noise_config.get("enabled", False)
-                else SilenceAudioMixer()
-            ),
+            audio_out_mixer=_get_ambience_mixer(audio_config, ambient_noise_config),
             serializer=serializer,
             audio_out_10ms_chunks=2,
         ),
@@ -197,19 +191,7 @@ async def create_ari_transport(
             audio_out_enabled=True,
             audio_in_sample_rate=audio_config.transport_in_sample_rate,
             audio_out_sample_rate=audio_config.transport_out_sample_rate,
-            audio_out_mixer=(
-                SoundfileMixer(
-                    sound_files={
-                        "office": APP_ROOT_DIR
-                        / "assets"
-                        / f"office-ambience-{audio_config.transport_out_sample_rate}-mono.wav"
-                    },
-                    default_sound="office",
-                    volume=ambient_noise_config.get("volume", 0.3),
-                )
-                if ambient_noise_config and ambient_noise_config.get("enabled", False)
-                else SilenceAudioMixer()
-            ),
+            audio_out_mixer=_get_ambience_mixer(audio_config, ambient_noise_config),
             serializer=serializer,
         ),
     )
@@ -260,19 +242,7 @@ async def create_vonage_transport(
             audio_out_enabled=True,
             audio_in_sample_rate=audio_config.transport_in_sample_rate,
             audio_out_sample_rate=audio_config.transport_out_sample_rate,
-            audio_out_mixer=(
-                SoundfileMixer(
-                    sound_files={
-                        "office": APP_ROOT_DIR
-                        / "assets"
-                        / f"office-ambience-{audio_config.transport_out_sample_rate}-mono.wav"
-                    },
-                    default_sound="office",
-                    volume=ambient_noise_config.get("volume", 0.3),
-                )
-                if ambient_noise_config and ambient_noise_config.get("enabled", False)
-                else SilenceAudioMixer()
-            ),
+            audio_out_mixer=_get_ambience_mixer(audio_config, ambient_noise_config),
             serializer=serializer,
         ),
     )
@@ -348,19 +318,7 @@ async def create_vobiz_transport(
             audio_out_enabled=True,
             audio_in_sample_rate=audio_config.transport_in_sample_rate,
             audio_out_sample_rate=audio_config.transport_out_sample_rate,
-            audio_out_mixer=(
-                SoundfileMixer(
-                    sound_files={
-                        "office": APP_ROOT_DIR
-                        / "assets"
-                        / f"office-ambience-{audio_config.transport_out_sample_rate}-mono.wav"
-                    },
-                    default_sound="office",
-                    volume=ambient_noise_config.get("volume", 0.3),
-                )
-                if ambient_noise_config and ambient_noise_config.get("enabled", False)
-                else SilenceAudioMixer()
-            ),
+            audio_out_mixer=_get_ambience_mixer(audio_config, ambient_noise_config),
             serializer=serializer,
         ),
     )
@@ -387,19 +345,7 @@ def create_webrtc_transport(
             audio_out_enabled=True,
             audio_in_sample_rate=audio_config.transport_in_sample_rate,
             audio_out_sample_rate=audio_config.transport_out_sample_rate,
-            audio_out_mixer=(
-                SoundfileMixer(
-                    sound_files={
-                        "office": APP_ROOT_DIR
-                        / "assets"
-                        / f"office-ambience-{audio_config.transport_out_sample_rate}-mono.wav"
-                    },
-                    default_sound="office",
-                    volume=ambient_noise_config.get("volume", 0.3),
-                )
-                if ambient_noise_config and ambient_noise_config.get("enabled", False)
-                else SilenceAudioMixer()
-            ),
+            audio_out_mixer=_get_ambience_mixer(audio_config, ambient_noise_config),
         ),
     )
 
