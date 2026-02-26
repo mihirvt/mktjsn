@@ -33,30 +33,51 @@ def create_cartesia_tts(user_config, audio_config):
             getattr(user_config.tts, "web_sample_rate", 44100) or 44100
         )
     
-    # Cap at pipeline rate to prevent disconnects from sample rate mismatch
-    # if the pipeline is at 16k, pushing 44.1k frames will confuse buffers.
-    sample_rate = min(requested_rate, pipeline_rate)
+    # Do NOT cap at pipeline rate for Cartesia, as the web transport handles
+    # the mismatch perfectly and downsizing later is supported.
+    sample_rate = requested_rate
     
     if requested_rate > pipeline_rate:
-        logger.warning(
+        logger.debug(
             f"Cartesia requested {requested_rate}Hz but pipeline is {pipeline_rate}Hz. "
-            f"Capping to {pipeline_rate}Hz for stability."
+            f"Cartesia supports this natively for web calls."
         )
 
     # Build Cartesia-specific parameters
     params = {}
+    cartesia_emotion = getattr(user_config.tts, "emotion", "neutral")
+    cartesia_speed = getattr(user_config.tts, "speed", 1.0)
+    cartesia_language = getattr(user_config.tts, "language", "en")
+    
     try:
-        # Cartesia Sonic-3 supports generation_config for emotions
-        params = CartesiaTTSService.InputParams(
-            generation_config=GenerationConfig(
-                emotion=getattr(user_config.tts, "emotion", "neutral")
-            )
+        # Cartesia Sonic-3 supports generation_config for emotions and speed
+        gen_config = GenerationConfig(
+            emotion=cartesia_emotion,
+            speed=cartesia_speed
         )
-    except Exception as e:
-        logger.warning(f"Failed to use GenerationConfig for Cartesia: {e}. Falling back...")
+        
+        # Try to pass add_context / continue_ logic to avoid double-message interruption issues
+        # Also request timestamps so pipecat knows exactly how much got spoken on interruptions
         try:
             params = CartesiaTTSService.InputParams(
-                emotion=getattr(user_config.tts, "emotion", "neutral")
+                generation_config=gen_config,
+                language=cartesia_language,
+                add_timestamps=True,
+                continue_=False  # Pipecat uses this to not hold context during interruptions
+            )
+        except Exception:
+            params = CartesiaTTSService.InputParams(
+                generation_config=gen_config,
+                language=cartesia_language
+            )
+            
+    except Exception as e:
+        logger.warning(f"Failed to use full InputParams for Cartesia: {e}. Falling back...")
+        try:
+            params = CartesiaTTSService.InputParams(
+                emotion=cartesia_emotion,
+                speed=cartesia_speed,
+                language=cartesia_language
             )
         except:
             params = None
