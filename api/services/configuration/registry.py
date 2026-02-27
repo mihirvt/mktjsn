@@ -173,6 +173,10 @@ class GroqLLMService(BaseLLMConfiguration):
         default="llama-3.3-70b-versatile", json_schema_extra={"examples": GROQ_MODELS}
     )
     api_key: str
+    temperature: float = Field(
+        default=0.6, ge=0.0, le=2.0,
+        description="Sampling temperature (0 = focused, 2 = creative)",
+    )
 
 
 @register_llm

@@ -312,10 +312,13 @@ def create_llm_service(user_config):
         print(
             f"Creating Groq LLM service with API key: {user_config.llm.api_key} and model: {model}"
         )
+        temperature = getattr(user_config.llm, "temperature", 0.6)
+        if temperature is None:
+            temperature = 0.6
         return GroqLLMService(
             api_key=user_config.llm.api_key,
             model=model,
-            params=OpenAILLMService.InputParams(temperature=0.1),
+            params=OpenAILLMService.InputParams(temperature=temperature),
         )
     elif user_config.llm.provider == ServiceProviders.OPENROUTER.value:
         return OpenRouterLLMService(
