@@ -142,23 +142,30 @@ class LoopTalkPipelineBuilder:
         audio_streamer = get_or_create_audio_streamer(str(test_session_id), role)
 
         # Create pipeline with AudioBufferProcessor after transport.output()
-        pipeline = Pipeline(
-            [
-                transport.input(),
-                audio_streamer,  # Stream audio to connected clients
-                stt_mute_filter,
-                stt,
-                transcript.user(),
-                user_context_aggregator,
-                llm,
-                pipeline_engine_callback_processor,
-                tts,
-                transport.output(),
-                audio_buffer,  # AudioBufferProcessor - records both input and output audio
-                transcript.assistant(),
-                assistant_context_aggregator,
-            ]
-        )
+        processors = [
+            transport.input(),
+            audio_streamer,  # Stream audio to connected clients
+            stt_mute_filter,
+            stt,
+            transcript.user(),
+            user_context_aggregator,
+            llm,
+        ]
+
+        if hasattr(llm, "_kimi_interceptor") and llm._kimi_interceptor:
+            logger.info("Adding KimiToolCallInterceptor to loopTalk pipeline")
+            processors.append(llm._kimi_interceptor)
+
+        processors.extend([
+            pipeline_engine_callback_processor,
+            tts,
+            transport.output(),
+            audio_buffer,  # AudioBufferProcessor - records both input and output audio
+            transcript.assistant(),
+            assistant_context_aggregator,
+        ])
+        
+        pipeline = Pipeline(processors)
 
         # Create pipeline task with unique conversation ID for tracing
         conversation_id = f"{test_session_id}-{role}-{agent_id}"

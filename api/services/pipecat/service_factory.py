@@ -334,11 +334,15 @@ def create_llm_service(user_config):
         temperature = getattr(user_config.llm, "temperature", 0.6)
         if temperature is None:
             temperature = 0.6
-        return GroqLLMService(
+        service = GroqLLMService(
             api_key=user_config.llm.api_key,
             model=model,
             params=OpenAILLMService.InputParams(temperature=temperature),
         )
+        if getattr(user_config.llm, "enable_kimi_tool_parser", False):
+            from api.plugins.kimi_tool_parser import KimiToolCallInterceptor
+            service._kimi_interceptor = KimiToolCallInterceptor()
+        return service
     elif user_config.llm.provider == ServiceProviders.OPENROUTER.value:
         return OpenRouterLLMService(
             api_key=user_config.llm.api_key,
@@ -377,7 +381,7 @@ def create_llm_service(user_config):
     elif user_config.llm.provider == ServiceProviders.DEEPINFRA.value:
         reasoning_effort = getattr(user_config.llm, "reasoning_effort", "none") or "none"
         temperature = getattr(user_config.llm, "temperature", 0.1) or 0.1
-        return DeepInfraLLMService(
+        service = DeepInfraLLMService(
             api_key=user_config.llm.api_key,
             model=model,
             params=OpenAILLMService.InputParams(
@@ -385,5 +389,9 @@ def create_llm_service(user_config):
                 extra={"reasoning_effort": reasoning_effort},
             ),
         )
+        if getattr(user_config.llm, "enable_kimi_tool_parser", False):
+            from api.plugins.kimi_tool_parser import KimiToolCallInterceptor
+            service._kimi_interceptor = KimiToolCallInterceptor()
+        return service
     else:
         raise HTTPException(status_code=400, detail="Invalid LLM provider")
