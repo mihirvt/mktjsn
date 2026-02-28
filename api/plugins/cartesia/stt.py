@@ -40,9 +40,7 @@ class CustomCartesiaSTTService(CartesiaSTTService):
                         self._resample_state
                     )
                     
-                    # Cartesia WebsocketSTTService intercepts AudioRawFrame
-                    # It validates the frame.sample_rate matches its own self.sample_rate
-                    # So we MUST pass the new upsampled frame.
+                    # Intercepts AudioRawFrame
                     new_frame = AudioRawFrame(
                         audio=resampled_audio,
                         sample_rate=self._target_sample_rate,
