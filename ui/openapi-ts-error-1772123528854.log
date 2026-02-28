@@ -1,7 +1,0 @@
-Request failed with status 200: 
-Error: Request failed with status 200: 
-    at yo (/Users/albatross/muktam.base/ui/node_modules/@hey-api/openapi-ts/dist/index.cjs:14:94936)
-    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
-    at async Promise.all (index 0)
-    at async Tj (/Users/albatross/muktam.base/ui/node_modules/@hey-api/openapi-ts/dist/index.cjs:1311:4503)
-    at async start (/Users/albatross/muktam.base/ui/node_modules/@hey-api/openapi-ts/bin/index.cjs:131:21)

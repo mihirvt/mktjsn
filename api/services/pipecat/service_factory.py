@@ -6,7 +6,6 @@ from loguru import logger
 from api.constants import MPS_API_URL
 from api.services.configuration.registry import ServiceProviders
 from pipecat.services.azure.llm import AzureLLMService
-from pipecat.services.cartesia.stt import CartesiaLiveOptions, CartesiaSTTService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
 from pipecat.services.deepgram.stt import DeepgramSTTService, LiveOptions
@@ -26,6 +25,7 @@ from api.plugins.sarvam import SarvamLLMService
 from api.plugins.deepinfra import DeepInfraLLMService
 from api.plugins.smallest_ai import SmallestAITTSService
 from api.plugins.cartesia.tts import create_cartesia_tts
+from api.plugins.cartesia.stt import create_cartesia_stt
 from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.text.xml_function_tag_filter import XMLFunctionTagFilter
@@ -84,17 +84,30 @@ def create_stt_service(
             api_key=user_config.stt.api_key, model=user_config.stt.model
         )
     elif user_config.stt.provider == ServiceProviders.CARTESIA.value:
-        language = getattr(user_config.stt, "language", "hi") or "hi"
-        return CartesiaSTTService(
-            api_key=user_config.stt.api_key,
-            live_options=CartesiaLiveOptions(
-                model=user_config.stt.model,
-                language=language,
-                encoding="pcm_s16le",
+        try:
+            service = create_cartesia_stt(user_config, audio_config)
+            if service:
+                return service
+            
+            # Fallback to standard Pipecat Cartesia service if plugin logic failed
+            from pipecat.services.cartesia.stt import CartesiaLiveOptions, CartesiaSTTService
+            language = getattr(user_config.stt, "language", "hi") or "hi"
+            return CartesiaSTTService(
+                api_key=user_config.stt.api_key,
+                live_options=CartesiaLiveOptions(
+                    model=user_config.stt.model,
+                    language=language,
+                    encoding="pcm_s16le",
+                    sample_rate=audio_config.transport_in_sample_rate,
+                ),
                 sample_rate=audio_config.transport_in_sample_rate,
-            ),
-            sample_rate=audio_config.transport_in_sample_rate,
-        )
+            )
+        except ImportError:
+            logger.error("Cartesia SDK not found. Call will fail. Please install: pip install 'pipecat-ai[cartesia]'")
+            raise
+        except Exception as e:
+            logger.error(f"Failed to initialize Cartesia STT: {e}")
+            raise
     elif user_config.stt.provider == ServiceProviders.DOGRAH.value:
         base_url = MPS_API_URL.replace("http://", "ws://").replace("https://", "wss://")
         language = getattr(user_config.stt, "language", None) or "multi"
