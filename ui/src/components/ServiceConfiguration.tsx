@@ -697,6 +697,26 @@ export default function ServiceConfiguration() {
             );
         }
 
+        if (actualSchema?.type === "boolean") {
+            return (
+                <div className="flex items-center space-x-2 h-10">
+                    <Checkbox
+                        id={`${service}_${field}`}
+                        checked={Boolean(watch(`${service}_${field}`))}
+                        onCheckedChange={(checked) => {
+                            setValue(`${service}_${field}`, checked, { shouldDirty: true });
+                        }}
+                    />
+                    <Label
+                        htmlFor={`${service}_${field}`}
+                        className="text-sm font-normal cursor-pointer text-muted-foreground"
+                    >
+                        {actualSchema?.description || `Enable ${field}`}
+                    </Label>
+                </div>
+            );
+        }
+
         return (
             <Input
                 type={actualSchema?.type === "number" ? "number" : "text"}
