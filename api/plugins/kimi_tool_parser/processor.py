@@ -12,7 +12,16 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 # Currently pipecat has varying function call frame formats but Kimi outputs it exactly like Pipecat's internal format
 # if we just parse the json.
 try:
-    from pipecat.frames.frames import LLMFullResponseStartFrame, LLMFullResponseEndFrame, UserStartedSpeakingFrame, InterruptionFrame
+    from pipecat.frames.frames import (
+        LLMFullResponseStartFrame,
+        LLMFullResponseEndFrame,
+        UserStartedSpeakingFrame,
+        InterruptionFrame,
+        LLMContextFrame
+    )
+    from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
+    from pipecat.services.llm_service import FunctionCallFromLLM
+    from pipecat.frames.frames import FunctionCallsFromLLMInfoFrame
 except ImportError:
     pass
 
@@ -68,14 +77,23 @@ class KimiToolCallInterceptor(FrameProcessor):
     This processor captures TextFrames that start Kimi tags, buffers them,
     parses them upon completion, and emits standard pipecat LLM Tool Call frames.
     """
-    def __init__(self):
+    def __init__(self, llm=None):
         super().__init__()
+        self._llm = llm
         self._is_buffering_tool = False
         self._tool_call_buffer = ""
         self._lookahead_buffer = ""
+        self._latest_context = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
+
+        if direction == FrameDirection.DOWNSTREAM:
+            try:
+                if isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
+                    self._latest_context = frame.context
+            except NameError:
+                pass
 
         if direction == FrameDirection.DOWNSTREAM and isinstance(frame, TextFrame):
             text = frame.text
@@ -91,42 +109,30 @@ class KimiToolCallInterceptor(FrameProcessor):
                     logger.debug(f"KimiToolCallInterceptor: Buffer complete, parsing...")
                     tool_calls = extract_tool_call_info(self._tool_call_buffer)
                     if tool_calls:
-                        # Attempt to map to Pipecat frames
-                        try:
-                            # Try the single tool call frame (newer Pipecat)
-                            from pipecat.frames.frames import LLMToolCallFrame
-                            for tc in tool_calls:
-                                tool_name = tc.get("function", {}).get("name", "")
-                                tool_args = tc.get("function", {}).get("arguments", "{}")
-                                tool_id = tc.get("id", "")
-                                logger.info(f"KimiToolCallInterceptor: Emitting LLMToolCallFrame({tool_name}, args={tool_args})")
-                                await self.push_frame(LLMToolCallFrame(
-                                    function_name=tool_name,
-                                    tool_call_id=tool_id,
-                                    arguments=tool_args
-                                ), direction)
-                        except ImportError:
-                            # Try the older FunctionCall format
+                        if self._llm and hasattr(self._llm, 'run_function_calls'):
                             try:
-                                from pipecat.frames.frames import FunctionCallInProgressFrame, FunctionCallFrame
+                                calls_to_run = []
                                 for tc in tool_calls:
                                     tool_name = tc.get("function", {}).get("name", "")
                                     args_raw = tc.get("function", {}).get("arguments", "{}")
                                     tool_args = json.loads(args_raw) if args_raw else {}
                                     tool_id = tc.get("id", "")
-                                    logger.info(f"KimiToolCallInterceptor: Emitting FunctionCallFrame({tool_name})")
-                                    await self.push_frame(FunctionCallInProgressFrame(
-                                        function_name=tool_name,
+                                    calls_to_run.append(FunctionCallFromLLM(
+                                        context=self._latest_context,
                                         tool_call_id=tool_id,
-                                        arguments=args_raw
-                                    ), direction)
-                                    await self.push_frame(FunctionCallFrame(
                                         function_name=tool_name,
-                                        tool_call_id=tool_id,
                                         arguments=tool_args
-                                    ), direction)
+                                    ))
+                                
+                                logger.info(f"KimiToolCallInterceptor: Submitting {len(calls_to_run)} function calls to LLM service")
+                                # Send info frame down for observers (e.g. realtime feedback)
+                                await self.push_frame(FunctionCallsFromLLMInfoFrame(function_calls=calls_to_run), direction)
+                                # Execute function calls on the underlying LLM
+                                await self._llm.run_function_calls(calls_to_run)
                             except Exception as e:
-                                logger.error(f"KimiToolCallInterceptor: Failed to construct Pipecat tool frames: {e}")
+                                logger.error(f"KimiToolCallInterceptor: Failed to run function calls: {e}")
+                        else:
+                            logger.error("KimiToolCallInterceptor: LLM reference missing or does not have run_function_calls")
                     else:
                         logger.warning(f"KimiToolCallInterceptor: Failed to parse buffered tool call tags: {self._tool_call_buffer}")
 
