@@ -328,9 +328,7 @@ def create_llm_service(user_config):
                 params=OpenAILLMService.InputParams(temperature=0.1),
             )
     elif user_config.llm.provider == ServiceProviders.GROQ.value:
-        print(
-            f"Creating Groq LLM service with API key: {user_config.llm.api_key} and model: {model}"
-        )
+        logger.debug(f"Creating Groq LLM service for model: {model}")
         temperature = getattr(user_config.llm, "temperature", 0.6)
         if temperature is None:
             temperature = 0.6

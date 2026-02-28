@@ -30,6 +30,20 @@ class UserConfiguration(BaseModel):
                         # If a legacy 'gemini' provider is found, remove it so it doesn't break Pydantic validation
                         # The system will automatically fall back to the defaults instead of crashing
                         data[service] = None
+                        continue
+
+                    # Normalize API keys copied from dashboards/editors that may include
+                    # invisible Unicode separators (e.g. U+2028) or trailing whitespace.
+                    api_key = data[service].get("api_key")
+                    if isinstance(api_key, str):
+                        normalized_key = (
+                            api_key.replace("\u2028", "")
+                            .replace("\u2029", "")
+                            .replace("\r", "")
+                            .replace("\n", "")
+                            .strip()
+                        )
+                        data[service]["api_key"] = normalized_key
             # Convert boolean enhancement to int for smallest_ai TTS configs
             if "tts" in data and isinstance(data.get("tts"), dict):
                 enhancement = data["tts"].get("enhancement")
