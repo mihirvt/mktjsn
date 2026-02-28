@@ -8,6 +8,28 @@ from api.logging_config import ENVIRONMENT, setup_logging
 # Set up logging and get the listener for cleanup
 setup_logging()
 
+import sys
+import asyncio
+
+# Patch Python 3.12 asyncio datagram transport bug (aioice fix)
+if sys.version_info >= (3, 12):
+    try:
+        from asyncio.selector_events import _SelectorDatagramTransport
+        original_sendto = _SelectorDatagramTransport.sendto
+
+        def patched_sendto(self, data, addr=None):
+            if not getattr(self, '_sock', None):
+                return
+            try:
+                return original_sendto(self, data, addr)
+            except Exception:
+                if not getattr(self, '_loop', None):
+                    return
+                raise
+        _SelectorDatagramTransport.sendto = patched_sendto
+    except ImportError:
+        pass
+
 
 if SENTRY_DSN and (
     DEPLOYMENT_MODE != "oss" or (DEPLOYMENT_MODE == "oss" and ENABLE_TELEMETRY)
