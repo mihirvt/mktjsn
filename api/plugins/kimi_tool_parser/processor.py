@@ -29,22 +29,25 @@ def extract_tool_call_info(tool_call_rsp: str):
     tool_calls = []
     
     # 1. Moonshot Native Format
-    if '<|tool_calls_section_begin|>' in tool_call_rsp:
-        pattern = r"<\|tool_calls_section_begin\|>(.*?)<\|tool_calls_section_end\|>"
-        sections = re.findall(pattern, tool_call_rsp, re.DOTALL)
-        if sections:
-            func_call_pattern = r"<\|tool_call_begin\|>\s*(?P<tool_call_id>[\w\.]+:\d+)\s*<\|tool_call_argument_begin\|>\s*(?P<function_arguments>.*?)\s*<\|tool_call_end\|>"
-            for match in re.findall(func_call_pattern, sections[0], re.DOTALL):
-                function_id, function_args = match
-                function_name = function_id.split('.')[1].split(':')[0]
-                tool_calls.append({
-                    "id": function_id,
-                    "type": "function",
-                    "function": {
-                        "name": function_name,
-                        "arguments": function_args
-                    }
-                })
+    if '<|tool_call_begin|>' in tool_call_rsp or '<|tool_calls_section_begin|>' in tool_call_rsp:
+        # Some providers may omit section end tokens. Parse tool_call blocks directly from
+        # the full text instead of requiring wrapper tags to be complete.
+        func_call_pattern = (
+            r"<\|tool_call_begin\|>\s*(?P<tool_call_id>[\w\.]+:\d+)\s*"
+            r"<\|tool_call_argument_begin\|>\s*(?P<function_arguments>.*?)\s*"
+            r"<\|tool_call_end\|>"
+        )
+        for match in re.findall(func_call_pattern, tool_call_rsp, re.DOTALL):
+            function_id, function_args = match
+            function_name = function_id.split('.')[1].split(':')[0]
+            tool_calls.append({
+                "id": function_id,
+                "type": "function",
+                "function": {
+                    "name": function_name,
+                    "arguments": function_args
+                }
+            })
                 
     # 2. DeepInfra / vLLM fallback format
     if '<function_calls>' in tool_call_rsp:
@@ -66,6 +69,56 @@ def extract_tool_call_info(tool_call_rsp: str):
                     "function": {
                         "name": func_name,
                         "arguments": json.dumps(args)
+                    }
+                })
+
+            # Also support self-closing invoke tags with no args.
+            self_closing_invokes = re.findall(r'<invoke\s+name="([^"]+)"\s*/>', block, re.DOTALL)
+            for func_name in self_closing_invokes:
+                tool_calls.append({
+                    "id": f"call_{uuid.uuid4().hex[:8]}",
+                    "type": "function",
+                    "function": {
+                        "name": func_name,
+                        "arguments": json.dumps({})
+                    }
+                })
+        else:
+            # Fallback when wrapper is incomplete/missing close tag:
+            # parse invoke blocks directly from full text.
+            import uuid
+            invokes = re.findall(
+                r'<invoke\s+name="([^"]+)"\s*>(.*?)</invoke>',
+                tool_call_rsp,
+                re.DOTALL,
+            )
+            for func_name, args_block in invokes:
+                args = {}
+                if args_block and args_block.strip():
+                    arg_matches = re.findall(r'<([^>]+)>(.*?)</\1>', args_block, re.DOTALL)
+                    for k, v in arg_matches:
+                        args[k] = v.strip()
+                tool_calls.append({
+                    "id": f"call_{uuid.uuid4().hex[:8]}",
+                    "type": "function",
+                    "function": {
+                        "name": func_name,
+                        "arguments": json.dumps(args)
+                    }
+                })
+
+            self_closing_invokes = re.findall(
+                r'<invoke\s+name="([^"]+)"\s*/>',
+                tool_call_rsp,
+                re.DOTALL,
+            )
+            for func_name in self_closing_invokes:
+                tool_calls.append({
+                    "id": f"call_{uuid.uuid4().hex[:8]}",
+                    "type": "function",
+                    "function": {
+                        "name": func_name,
+                        "arguments": json.dumps({})
                     }
                 })
 
@@ -181,7 +234,9 @@ class KimiToolCallInterceptor(FrameProcessor):
             
             # No partial tags detected, flush lookahead buffer immediately
             if self._lookahead_buffer:
-                await self.push_frame(TextFrame(self._lookahead_buffer), direction)
+                # Avoid sending blank/whitespace-only chunks to TTS providers.
+                if self._lookahead_buffer.strip():
+                    await self.push_frame(TextFrame(self._lookahead_buffer), direction)
                 self._lookahead_buffer = ""
             
             return
@@ -191,8 +246,37 @@ class KimiToolCallInterceptor(FrameProcessor):
             # Note: For LLMFullResponseEndFrame, flush remaining lookahead buffer!
             from pipecat.frames.frames import LLMFullResponseEndFrame
             if direction == FrameDirection.DOWNSTREAM and isinstance(frame, LLMFullResponseEndFrame):
+                # Groq/vLLM can occasionally truncate or omit section-end tags.
+                # Finalize any buffered tool payload at end-of-response.
+                if self._is_buffering_tool and self._tool_call_buffer:
+                    logger.debug("KimiToolCallInterceptor: Finalizing buffered tool payload on response end")
+                    tool_calls = extract_tool_call_info(self._tool_call_buffer)
+                    if tool_calls and self._llm and hasattr(self._llm, 'run_function_calls'):
+                        try:
+                            calls_to_run = []
+                            for tc in tool_calls:
+                                tool_name = tc.get("function", {}).get("name", "")
+                                args_raw = tc.get("function", {}).get("arguments", "{}")
+                                tool_args = json.loads(args_raw) if args_raw else {}
+                                tool_id = tc.get("id", "")
+                                calls_to_run.append(FunctionCallFromLLM(
+                                    context=self._latest_context,
+                                    tool_call_id=tool_id,
+                                    function_name=tool_name,
+                                    arguments=tool_args
+                                ))
+                            await self.push_frame(FunctionCallsFromLLMInfoFrame(function_calls=calls_to_run), direction)
+                            await self._llm.run_function_calls(calls_to_run)
+                        except Exception as e:
+                            logger.error(f"KimiToolCallInterceptor: Failed to finalize run_function_calls: {e}")
+                    else:
+                        logger.debug("KimiToolCallInterceptor: No parsable tool calls found in final buffered payload")
+                    self._is_buffering_tool = False
+                    self._tool_call_buffer = ""
+
                 if self._lookahead_buffer:
-                    await self.push_frame(TextFrame(self._lookahead_buffer), direction)
+                    if self._lookahead_buffer.strip():
+                        await self.push_frame(TextFrame(self._lookahead_buffer), direction)
                     self._lookahead_buffer = ""
             
             await self.push_frame(frame, direction)
