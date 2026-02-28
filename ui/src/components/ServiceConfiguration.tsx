@@ -221,8 +221,18 @@ export default function ServiceConfiguration() {
         stt: "",
         embeddings: ""
     });
-    const [isManualModelInput, setIsManualModelInput] = useState(false);
-    const [hasCheckedManualMode, setHasCheckedManualMode] = useState(false);
+    const [isManualModelInput, setIsManualModelInput] = useState<Record<ServiceSegment, boolean>>({
+        llm: false,
+        tts: false,
+        stt: false,
+        embeddings: false
+    });
+    const [hasCheckedManualMode, setHasCheckedManualMode] = useState<Record<ServiceSegment, boolean>>({
+        llm: false,
+        tts: false,
+        stt: false,
+        embeddings: false
+    });
 
     const {
         register,
@@ -291,28 +301,34 @@ export default function ServiceConfiguration() {
         fetchConfigurations();
     }, [reset, userConfig]);
 
-    // Check if the saved LLM model is not in the suggested options (custom model)
+    // Check if the saved model is not in the suggested options (custom model) for each service
     useEffect(() => {
-        if (hasCheckedManualMode) return;
+        const segments: ServiceSegment[] = ["llm", "tts", "stt", "embeddings"];
+        segments.forEach((service) => {
+            if (hasCheckedManualMode[service]) return;
 
-        const currentProvider = serviceProviders.llm;
-        const providerSchema = schemas?.llm?.[currentProvider];
-        if (!providerSchema) return;
+            const currentProvider = serviceProviders[service];
+            const providerSchema = schemas?.[service]?.[currentProvider];
+            if (!providerSchema) return;
 
-        const modelSchema = providerSchema.properties.model;
-        const actualModelSchema = modelSchema?.$ref && providerSchema.$defs
-            ? providerSchema.$defs[modelSchema.$ref.split('/').pop() || '']
-            : modelSchema;
+            const modelSchema = providerSchema.properties.model;
+            // For schemas built by pydantic, we don't always have modelSchema (e.g. Dograh default)
+            if (!modelSchema) return;
 
-        if (actualModelSchema?.examples && userConfig?.llm?.model) {
-            const savedModel = userConfig.llm.model as string;
-            const isInOptions = actualModelSchema.examples.includes(savedModel);
-            if (!isInOptions) {
-                setIsManualModelInput(true);
+            const actualModelSchema = modelSchema?.$ref && providerSchema.$defs
+                ? providerSchema.$defs[modelSchema.$ref.split('/').pop() || '']
+                : modelSchema;
+
+            if (actualModelSchema?.examples && userConfig?.[service]?.model) {
+                const savedModel = userConfig[service].model as string;
+                const isInOptions = actualModelSchema.examples.includes(savedModel);
+                if (!isInOptions) {
+                    setIsManualModelInput(prev => ({ ...prev, [service]: true }));
+                }
+                setHasCheckedManualMode(prev => ({ ...prev, [service]: true }));
             }
-            setHasCheckedManualMode(true);
-        }
-    }, [schemas, serviceProviders.llm, userConfig?.llm?.model, hasCheckedManualMode]);
+        });
+    }, [schemas, serviceProviders, userConfig, hasCheckedManualMode]);
 
     // Reset voice when TTS model changes if the provider has model-dependent voice options
     const ttsModel = watch("tts_model");
@@ -371,10 +387,8 @@ export default function ServiceConfiguration() {
         reset(preservedValues);
         setServiceProviders(prev => ({ ...prev, [service]: providerName }));
 
-        // Reset manual model input when LLM provider changes
-        if (service === "llm") {
-            setIsManualModelInput(false);
-        }
+        // Reset manual model input when provider changes
+        setIsManualModelInput(prev => ({ ...prev, [service]: false }));
     }
 
 
@@ -558,12 +572,12 @@ export default function ServiceConfiguration() {
             }
         }
 
-        // Handle LLM model field with manual input toggle (uses examples from schema)
-        if (service === "llm" && field === "model" && actualSchema?.examples) {
+        // Handle model field with manual input toggle (uses examples from schema)
+        if (field === "model" && actualSchema?.examples) {
             const currentValue = watch(`${service}_${field}`) as string || "";
             const modelOptions = actualSchema.examples;
 
-            if (isManualModelInput) {
+            if (isManualModelInput[service]) {
                 return (
                     <div className="space-y-2">
                         <Input
@@ -576,10 +590,10 @@ export default function ServiceConfiguration() {
                         />
                         <div className="flex items-center space-x-2">
                             <Checkbox
-                                id="manual-model-input"
-                                checked={isManualModelInput}
+                                id={`manual-model-input-${service}`}
+                                checked={isManualModelInput[service]}
                                 onCheckedChange={(checked) => {
-                                    setIsManualModelInput(checked as boolean);
+                                    setIsManualModelInput(prev => ({ ...prev, [service]: checked as boolean }));
                                     if (!checked && modelOptions.length > 0) {
                                         // Reset to first option when switching back
                                         setValue(`${service}_${field}`, modelOptions[0], { shouldDirty: true });
@@ -587,7 +601,7 @@ export default function ServiceConfiguration() {
                                 }}
                             />
                             <Label
-                                htmlFor="manual-model-input"
+                                htmlFor={`manual-model-input-${service}`}
                                 className="text-sm font-normal cursor-pointer"
                             >
                                 Add Model Manually
@@ -619,14 +633,14 @@ export default function ServiceConfiguration() {
                     </Select>
                     <div className="flex items-center space-x-2">
                         <Checkbox
-                            id="manual-model-input-dropdown"
-                            checked={isManualModelInput}
+                            id={`manual-model-input-dropdown-${service}`}
+                            checked={isManualModelInput[service]}
                             onCheckedChange={(checked) => {
-                                setIsManualModelInput(checked as boolean);
+                                setIsManualModelInput(prev => ({ ...prev, [service]: checked as boolean }));
                             }}
                         />
                         <Label
-                            htmlFor="manual-model-input-dropdown"
+                            htmlFor={`manual-model-input-dropdown-${service}`}
                             className="text-sm font-normal cursor-pointer"
                         >
                             Add Model Manually

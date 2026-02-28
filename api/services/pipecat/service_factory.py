@@ -27,6 +27,7 @@ from api.plugins.smallest_ai import SmallestAITTSService
 from api.plugins.cartesia.tts import create_cartesia_tts
 from api.plugins.cartesia.stt import create_cartesia_stt
 from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
+from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.text.xml_function_tag_filter import XMLFunctionTagFilter
 
@@ -137,10 +138,15 @@ def create_stt_service(
         }
         language = getattr(user_config.stt, "language", None)
         pipecat_language = language_mapping.get(language, Language.HI_IN)
+        mode = getattr(user_config.stt, "mode", None)
+        params = SarvamSTTService.InputParams(language=pipecat_language)
+        if mode:
+            params.mode = mode
+
         return SarvamSTTService(
             api_key=user_config.stt.api_key,
             model=user_config.stt.model,
-            params=SarvamSTTService.InputParams(language=pipecat_language),
+            params=params,
             sample_rate=audio_config.transport_in_sample_rate,
         )
     elif user_config.stt.provider == ServiceProviders.SPEECHMATICS.value:

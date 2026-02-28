@@ -691,17 +691,21 @@ class DograhSTTService(BaseSTTConfiguration):
 
 
 # Sarvam STT Service
-SARVAM_STT_MODELS = ["saarika:v2.5", "saaras:v2"]
+SARVAM_STT_MODELS = ["saaras:v3", "saarika:v2.5", "saaras:v2"]
+SARVAM_MODE_OPTIONS = ["transcribe", "translate", "verbatim", "translit", "codemix"]
 
 
 @register_stt
 class SarvamSTTConfiguration(BaseSTTConfiguration):
     provider: Literal[ServiceProviders.SARVAM] = ServiceProviders.SARVAM
     model: str = Field(
-        default="saarika:v2.5", json_schema_extra={"examples": SARVAM_STT_MODELS}
+        default="saaras:v3", json_schema_extra={"examples": SARVAM_STT_MODELS}
     )
     language: str = Field(
-        default="hi-IN", json_schema_extra={"examples": SARVAM_LANGUAGES}
+        default="unknown", json_schema_extra={"examples": SARVAM_LANGUAGES + ["unknown"]}
+    )
+    mode: str = Field(
+        default="transcribe", json_schema_extra={"examples": SARVAM_MODE_OPTIONS}
     )
     api_key: str
 
