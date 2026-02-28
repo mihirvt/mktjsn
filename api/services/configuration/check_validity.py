@@ -77,9 +77,11 @@ class UserConfigurationValidator:
 
         provider = service_config.provider
         api_key = service_config.api_key
+        
+        provider_val = provider.value if hasattr(provider, "value") else provider
 
         if not self._check_api_key(provider, api_key):
-            return [{"model": service_name, "message": f"Invalid {provider} API key"}]
+            return [{"model": service_name, "message": f"Invalid {provider_val} API key"}]
 
         return []
 
@@ -95,20 +97,22 @@ class UserConfigurationValidator:
         return validator(provider_val, api_key)
 
     def _check_openai_api_key(self, model: str, api_key: str) -> bool:
-        if model in self._provider_api_key_validity_status:
-            return self._provider_api_key_validity_status[model]
+        cache_key = f"{model}:{api_key}"
+        if cache_key in self._provider_api_key_validity_status:
+            return self._provider_api_key_validity_status[cache_key]
 
         client = openai.OpenAI(api_key=api_key)
         try:
             client.models.list()
-            self._provider_api_key_validity_status[model] = True
+            self._provider_api_key_validity_status[cache_key] = True
         except openai.AuthenticationError:
-            self._provider_api_key_validity_status[model] = False
-        return self._provider_api_key_validity_status[model]
+            self._provider_api_key_validity_status[cache_key] = False
+        return self._provider_api_key_validity_status[cache_key]
 
     def _check_deepgram_api_key(self, model: str, api_key: str) -> bool:
-        if model in self._provider_api_key_validity_status:
-            return self._provider_api_key_validity_status[model]
+        cache_key = f"{model}:{api_key}"
+        if cache_key in self._provider_api_key_validity_status:
+            return self._provider_api_key_validity_status[cache_key]
 
         deepgram = DeepgramClient(api_key)
         dg_connection = deepgram.listen.websocket.v("1")
@@ -121,22 +125,23 @@ class UserConfigurationValidator:
             )
 
             connected = dg_connection.start(options)
-            self._provider_api_key_validity_status[model] = connected
+            self._provider_api_key_validity_status[cache_key] = connected
         finally:
             dg_connection.finish()
-        return self._provider_api_key_validity_status[model]
+        return self._provider_api_key_validity_status[cache_key]
 
     def _check_groq_api_key(self, model: str, api_key: str) -> bool:
-        if model in self._provider_api_key_validity_status:
-            return self._provider_api_key_validity_status[model]
+        cache_key = f"{model}:{api_key}"
+        if cache_key in self._provider_api_key_validity_status:
+            return self._provider_api_key_validity_status[cache_key]
 
         client = Groq(api_key=api_key)
         try:
             client.models.list()
-            self._provider_api_key_validity_status[model] = True
-        except Exception:
-            self._provider_api_key_validity_status[model] = False
-        return self._provider_api_key_validity_status[model]
+            self._provider_api_key_validity_status[cache_key] = True
+        except Exception as e:
+            self._provider_api_key_validity_status[cache_key] = False
+        return self._provider_api_key_validity_status[cache_key]
 
     def _validate_elevenlabs_api_key(self, model: str, api_key: str) -> bool:
         return True
