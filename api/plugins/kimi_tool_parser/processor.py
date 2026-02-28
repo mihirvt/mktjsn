@@ -72,21 +72,15 @@ class KimiToolCallInterceptor(FrameProcessor):
         super().__init__()
         self._is_buffering_tool = False
         self._tool_call_buffer = ""
+        self._lookahead_buffer = ""
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
         if direction == FrameDirection.DOWNSTREAM and isinstance(frame, TextFrame):
             text = frame.text
 
-            # If we see the start tag in this chunk or are already buffering
-            is_moonshot_tag = "<|tool_calls_section_begin|>" in text
-            is_vllm_tag = "<function_calls>" in text
-
-            if is_moonshot_tag or is_vllm_tag or self._is_buffering_tool:
-                if not self._is_buffering_tool:
-                    self._is_buffering_tool = True
-                    self._tool_call_buffer = ""
-                    logger.debug(f"KimiToolCallInterceptor: Triggered, buffering tool call stream.")
-                
+            if self._is_buffering_tool:
                 self._tool_call_buffer += text
                 
                 # If we've hit the end tag, parse and emit
@@ -142,8 +136,57 @@ class KimiToolCallInterceptor(FrameProcessor):
                 
                 # Consume this TextFrame so it doesn't leak into the TTS!
                 return
+
+            # Not buffering tool yet, accumulate into lookahead buffer
+            self._lookahead_buffer += text
             
-            # Normal conversation text, pass down to TTS
-            await self.push_frame(frame, direction)
+            # Check if lookahead complete matches a start tag
+            if "<|tool_calls_section_begin|>" in self._lookahead_buffer or "<function_calls>" in self._lookahead_buffer:
+                # Flush text before tag to normal processing
+                tag_idx1 = self._lookahead_buffer.find("<|tool_calls_section_begin|>")
+                tag_idx2 = self._lookahead_buffer.find("<function_calls>")
+                start_idx = tag_idx1 if tag_idx1 != -1 else tag_idx2
+                
+                safe_to_flush = self._lookahead_buffer[:start_idx]
+                if safe_to_flush:
+                    await self.push_frame(TextFrame(safe_to_flush), direction)
+
+                self._is_buffering_tool = True
+                self._tool_call_buffer = self._lookahead_buffer[start_idx:]
+                self._lookahead_buffer = ""
+                logger.debug(f"KimiToolCallInterceptor: Triggered, buffering tool call stream.")
+                return
+
+            # If no complete match, check for partial tags
+            last_lt = self._lookahead_buffer.rfind('<')
+            if last_lt != -1:
+                possible_tag = self._lookahead_buffer[last_lt:]
+                # Check if this possible prefix matches our tags (up to length of partial string)
+                if len(possible_tag) < 30 and (
+                    "<|tool_calls_section_begin|>".startswith(possible_tag) or 
+                    "<function_calls>".startswith(possible_tag)
+                ):
+                    # Delay this part. Flush everything before it
+                    safe_to_flush = self._lookahead_buffer[:last_lt]
+                    if safe_to_flush:
+                        await self.push_frame(TextFrame(safe_to_flush), direction)
+                    self._lookahead_buffer = possible_tag
+                    return
+            
+            # No partial tags detected, flush lookahead buffer immediately
+            if self._lookahead_buffer:
+                await self.push_frame(TextFrame(self._lookahead_buffer), direction)
+                self._lookahead_buffer = ""
+            
+            return
+            
         else:
+            # Non-Text frames or upstream frames pass through
+            # Note: For LLMFullResponseEndFrame, flush remaining lookahead buffer!
+            from pipecat.frames.frames import LLMFullResponseEndFrame
+            if direction == FrameDirection.DOWNSTREAM and isinstance(frame, LLMFullResponseEndFrame):
+                if self._lookahead_buffer:
+                    await self.push_frame(TextFrame(self._lookahead_buffer), direction)
+                    self._lookahead_buffer = ""
+            
             await self.push_frame(frame, direction)
