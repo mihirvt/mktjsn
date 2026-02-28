@@ -239,6 +239,9 @@ class SarvamSTTService(STTService):
         self._websocket_context = None
         self._socket_client = None
         self._receive_task = None
+        # Tracks whether the STT service is in an active call session.
+        # Prevents reconnect attempts after stop/cancel teardown starts.
+        self._session_active = False
 
         if self._vad_signals:
             self._register_event_handler("on_speech_started")
@@ -333,6 +336,7 @@ class SarvamSTTService(STTService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
+        self._session_active = True
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -341,6 +345,7 @@ class SarvamSTTService(STTService):
         Args:
             frame: The end frame.
         """
+        self._session_active = False
         await super().stop(frame)
         await self._disconnect()
 
@@ -350,6 +355,7 @@ class SarvamSTTService(STTService):
         Args:
             frame: The cancel frame.
         """
+        self._session_active = False
         await super().cancel(frame)
         await self._disconnect()
 
@@ -362,6 +368,11 @@ class SarvamSTTService(STTService):
         Yields:
             Frame: None (transcription results come via WebSocket callbacks).
         """
+        if not self._session_active:
+            # Ignore late audio frames that can arrive while teardown is in progress.
+            yield None
+            return
+
         if not self._socket_client:
             logger.warning("WebSocket not connected, attempting to reconnect...")
             try:

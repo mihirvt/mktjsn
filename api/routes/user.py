@@ -150,6 +150,9 @@ async def update_user_configurations(
         validator = UserConfigurationValidator()
         await validator.validate(user_configurations)
     except ValueError as e:
+        logger.warning(
+            f"User configuration validation failed for user_id={user.id}: {e.args[0]}"
+        )
         raise HTTPException(status_code=422, detail=e.args[0])
 
     user_configurations = await db_client.update_user_configuration(
@@ -190,6 +193,9 @@ async def validate_user_configurations(
             await db_client.update_user_configuration_last_validated_at(user.id)
             return status
         except ValueError as e:
+            logger.warning(
+                f"User configuration validation failed (validate endpoint) for user_id={user.id}: {e.args[0]}"
+            )
             raise HTTPException(status_code=422, detail=e.args[0])
     else:
         return {"status": []}

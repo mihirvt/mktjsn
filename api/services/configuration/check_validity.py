@@ -6,6 +6,7 @@ from deepgram import (
     LiveOptions,
 )
 from groq import Groq
+from loguru import logger
 
 # try:
 #     from pyneuphonic import Neuphonic
@@ -89,12 +90,16 @@ class UserConfigurationValidator:
         """Check if an API key for a provider is valid."""
         # Provider might be an Enum object at runtime instead of a string
         provider_val = provider.value if hasattr(provider, "value") else provider
+        normalized_api_key = api_key.strip() if isinstance(api_key, str) else ""
+        if not normalized_api_key:
+            return False
 
         validator = self._validator_map.get(provider_val)
         if not validator:
+            logger.warning(f"No API key validator configured for provider '{provider_val}'")
             return False
 
-        return validator(provider_val, api_key)
+        return validator(provider_val, normalized_api_key)
 
     def _check_openai_api_key(self, model: str, api_key: str) -> bool:
         cache_key = f"{model}:{api_key}"
@@ -135,12 +140,29 @@ class UserConfigurationValidator:
         if cache_key in self._provider_api_key_validity_status:
             return self._provider_api_key_validity_status[cache_key]
 
-        client = Groq(api_key=api_key)
         try:
+            client = Groq(api_key=api_key)
             client.models.list()
             self._provider_api_key_validity_status[cache_key] = True
         except Exception as e:
-            self._provider_api_key_validity_status[cache_key] = False
+            # Avoid false "invalid key" errors for transient network/provider issues.
+            # Treat explicit auth failures as invalid; soft-pass other validation failures.
+            message = str(e).lower()
+            auth_failure_markers = [
+                "invalid api key",
+                "authentication",
+                "unauthorized",
+                "forbidden",
+                "permission denied",
+                "401",
+                "403",
+            ]
+            is_auth_failure = any(marker in message for marker in auth_failure_markers)
+            self._provider_api_key_validity_status[cache_key] = not is_auth_failure
+            logger.warning(
+                "Groq key validation failed with non-auth-safe fallback. "
+                f"auth_failure={is_auth_failure}, error={e}"
+            )
         return self._provider_api_key_validity_status[cache_key]
 
     def _validate_elevenlabs_api_key(self, model: str, api_key: str) -> bool:
