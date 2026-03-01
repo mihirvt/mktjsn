@@ -3,7 +3,9 @@ from loguru import logger
 from pipecat.services.cartesia.stt import CartesiaSTTService, CartesiaLiveOptions
 from pipecat.frames.frames import Frame, AudioRawFrame
 from pipecat.processors.frame_processor import FrameDirection
-
+import urllib.parse
+from websockets.protocol import State
+from websockets.asyncio.client import connect as websocket_connect
 class CustomCartesiaSTTService(CartesiaSTTService):
     """
     Cartesia STT performs poorly with PCM 8000Hz (telephony).
@@ -23,8 +25,32 @@ class CustomCartesiaSTTService(CartesiaSTTService):
             kwargs['live_options'].sample_rate = target_sample_rate
             self._language = kwargs['live_options'].language
             self._model = kwargs['live_options'].model
+            self._min_volume = kwargs.pop('min_volume', 0.1)
+            self._max_silence_duration_secs = kwargs.pop('max_silence_duration_secs', 1.5)
             
         super().__init__(**kwargs)
+
+    async def _connect_websocket(self):
+        try:
+            if self._websocket and self._websocket.state is State.OPEN:
+                return
+            logger.debug(f"Connecting to Cartesia STT Plugin with Strict VAD (Vol={self._min_volume}, Silence={self._max_silence_duration_secs})")
+
+            params = {
+                "model": self._settings.model,
+                "language": self._settings.language,
+                "encoding": self._settings.encoding,
+                "sample_rate": str(self.sample_rate),
+                "min_volume": str(self._min_volume),
+                "max_silence_duration_secs": str(self._max_silence_duration_secs)
+            }
+            ws_url = f"wss://{self._base_url}/stt/websocket?{urllib.parse.urlencode(params)}"
+            headers = {"Cartesia-Version": "2025-04-16", "X-API-Key": self._api_key}
+
+            self._websocket = await websocket_connect(ws_url, additional_headers=headers)
+            await self._call_event_handler("on_connected")
+        except Exception as e:
+            await self.push_error(error_msg=f"Unknown error occurred: {e}", exception=e)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, AudioRawFrame):
@@ -76,6 +102,8 @@ def create_cartesia_stt(user_config, audio_config):
         api_key=user_config.stt.api_key,
         target_sample_rate=target_rate,
         original_sample_rate=transport_rate,
+        min_volume=0.1,  # Threshold to reject background noise/TTS echo
+        max_silence_duration_secs=1.5,  # Prevents long open chunks collecting noise
         live_options=CartesiaLiveOptions(
             model=user_config.stt.model,
             language=language,
