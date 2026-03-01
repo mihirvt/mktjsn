@@ -22,13 +22,21 @@ class CustomCartesiaSTTService(CartesiaSTTService):
         kwargs['sample_rate'] = target_sample_rate
         
         if 'live_options' in kwargs:
+            # Older Pipecat versions pass `CartesiaLiveOptions` directly containing attributes
+            self._language = getattr(kwargs['live_options'], 'language', 'hi')
+            self._model = getattr(kwargs['live_options'], 'model', 'ink-whisper')
+            # CartesiaLiveOptions also defaults encoding
+            self._encoding = getattr(kwargs['live_options'], 'encoding', 'pcm_s16le')
             kwargs['live_options'].sample_rate = target_sample_rate
-            self._language = kwargs['live_options'].language
-            self._model = kwargs['live_options'].model
+            
             self._min_volume = kwargs.pop('min_volume', 0.1)
             self._max_silence_duration_secs = kwargs.pop('max_silence_duration_secs', 1.5)
             
         super().__init__(**kwargs)
+        
+        # Buffer initialization (100ms chunks)
+        self._audio_buffer = bytearray()
+        self._buffer_size = int(target_sample_rate * 2 * 0.1)
 
     async def _connect_websocket(self):
         try:
@@ -37,9 +45,9 @@ class CustomCartesiaSTTService(CartesiaSTTService):
             logger.debug(f"Connecting to Cartesia STT Plugin with Strict VAD (Vol={self._min_volume}, Silence={self._max_silence_duration_secs})")
 
             params = {
-                "model": self._settings.model,
-                "language": self._settings.language,
-                "encoding": self._settings.encoding,
+                "model": self._model,
+                "language": self._language,
+                "encoding": self._encoding,
                 "sample_rate": str(self.sample_rate),
                 "min_volume": str(self._min_volume),
                 "max_silence_duration_secs": str(self._max_silence_duration_secs)
@@ -66,19 +74,38 @@ class CustomCartesiaSTTService(CartesiaSTTService):
                         self._resample_state
                     )
                     
-                    # Intercepts AudioRawFrame
-                    new_frame = AudioRawFrame(
-                        audio=resampled_audio,
-                        sample_rate=self._target_sample_rate,
-                        num_channels=frame.num_channels
-                    )
-                    return await super().process_frame(new_frame, direction)
+                    # Accumulate in buffer
+                    self._audio_buffer.extend(resampled_audio)
+                    
+                    while len(self._audio_buffer) >= self._buffer_size:
+                        # Yield buffer as complete 100ms chunk
+                        chunk_to_send = self._audio_buffer[:self._buffer_size]
+                        self._audio_buffer = self._audio_buffer[self._buffer_size:]
+                        
+                        new_frame = AudioRawFrame(
+                            audio=bytes(chunk_to_send),
+                            sample_rate=self._target_sample_rate,
+                            num_channels=frame.num_channels
+                        )
+                        await super().process_frame(new_frame, direction)
+                    return
                 except Exception as e:
                     logger.error(f"Error resampling Cartesia STT frame: {e}")
                     # Skip this corrupted frame
                     return
             else:
-                return await super().process_frame(frame, direction)
+                self._audio_buffer.extend(frame.audio)
+                while len(self._audio_buffer) >= self._buffer_size:
+                    chunk_to_send = self._audio_buffer[:self._buffer_size]
+                    self._audio_buffer = self._audio_buffer[self._buffer_size:]
+
+                    new_frame = AudioRawFrame(
+                        audio=bytes(chunk_to_send),
+                        sample_rate=frame.sample_rate,
+                        num_channels=frame.num_channels
+                    )
+                    await super().process_frame(new_frame, direction)
+                return
                 
         # Forward any non-audio frames untouched
         return await super().process_frame(frame, direction)
