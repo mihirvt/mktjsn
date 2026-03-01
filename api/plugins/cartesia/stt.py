@@ -34,8 +34,9 @@ class CustomCartesiaSTTService(CartesiaSTTService):
             
         super().__init__(**kwargs)
         
-        # We stream strictly in real-time, matching other STT implementations.
-        pass
+        # Buffer initialization (100ms chunks)
+        self._audio_buffer = bytearray()
+        self._buffer_size = int(target_sample_rate * 2 * 0.1)
 
     async def _connect_websocket(self):
         try:
@@ -73,21 +74,40 @@ class CustomCartesiaSTTService(CartesiaSTTService):
                         self._resample_state
                     )
                     
-                    import copy
-                    new_frame = copy.copy(frame)
-                    new_frame.audio = bytes(resampled_audio)
-                    new_frame.sample_rate = self._target_sample_rate
-                    if hasattr(new_frame, "num_frames"):
-                        new_frame.num_frames = int(len(new_frame.audio) / (new_frame.num_channels * 2))
+                    # Accumulate in buffer
+                    self._audio_buffer.extend(resampled_audio)
+                    
+                    while len(self._audio_buffer) >= self._buffer_size:
+                        # Yield buffer as complete 100ms chunk
+                        chunk_to_send = self._audio_buffer[:self._buffer_size]
+                        self._audio_buffer = self._audio_buffer[self._buffer_size:]
                         
-                    await super().process_frame(new_frame, direction)
+                        import copy
+                        new_frame = copy.copy(frame)
+                        new_frame.audio = bytes(chunk_to_send)
+                        new_frame.sample_rate = self._target_sample_rate
+                        if hasattr(new_frame, "num_frames"):
+                            new_frame.num_frames = int(len(new_frame.audio) / (new_frame.num_channels * 2))
+                            
+                        await super().process_frame(new_frame, direction)
                     return
                 except Exception as e:
                     logger.error(f"Error resampling Cartesia STT frame: {e}")
                     # Skip this corrupted frame
                     return
             else:
-                await super().process_frame(frame, direction)
+                self._audio_buffer.extend(frame.audio)
+                while len(self._audio_buffer) >= self._buffer_size:
+                    chunk_to_send = self._audio_buffer[:self._buffer_size]
+                    self._audio_buffer = self._audio_buffer[self._buffer_size:]
+
+                    import copy
+                    new_frame = copy.copy(frame)
+                    new_frame.audio = bytes(chunk_to_send)
+                    if hasattr(new_frame, "num_frames"):
+                        new_frame.num_frames = int(len(new_frame.audio) / (new_frame.num_channels * 2))
+                        
+                    await super().process_frame(new_frame, direction)
                 return
                 
         # Forward any non-audio frames untouched
@@ -112,7 +132,7 @@ def create_cartesia_stt(user_config, audio_config):
         api_key=user_config.stt.api_key,
         target_sample_rate=target_rate,
         original_sample_rate=transport_rate,
-        min_volume=0.1,  # Threshold to reject background noise/TTS echo
+        min_volume=0.3,  # Increased from 0.1 to avoid echoing/hallucinating TTS audio
         max_silence_duration_secs=1.5,  # Prevents long open chunks collecting noise
         live_options=CartesiaLiveOptions(
             model=user_config.stt.model,
