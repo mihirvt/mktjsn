@@ -48,6 +48,7 @@ const TAB_CONFIG: { key: ServiceSegment; label: string }[] = [
 // Display names for language codes (Deepgram + Sarvam)
 const LANGUAGE_DISPLAY_NAMES: Record<string, string> = {
     "multi": "Multilingual (Auto-detect)",
+    "multilingual": "Multilingual (Auto-detect)",
     // Arabic
     "ar": "Arabic",
     "ar-AE": "Arabic (UAE)",
