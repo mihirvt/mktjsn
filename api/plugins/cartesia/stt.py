@@ -82,11 +82,13 @@ class CustomCartesiaSTTService(CartesiaSTTService):
                         chunk_to_send = self._audio_buffer[:self._buffer_size]
                         self._audio_buffer = self._audio_buffer[self._buffer_size:]
                         
-                        new_frame = AudioRawFrame(
-                            audio=bytes(chunk_to_send),
-                            sample_rate=self._target_sample_rate,
-                            num_channels=frame.num_channels
-                        )
+                        import copy
+                        new_frame = copy.copy(frame)
+                        new_frame.audio = bytes(chunk_to_send)
+                        new_frame.sample_rate = self._target_sample_rate
+                        if hasattr(new_frame, "num_frames"):
+                            new_frame.num_frames = int(len(new_frame.audio) / (new_frame.num_channels * 2))
+                            
                         await super().process_frame(new_frame, direction)
                     return
                 except Exception as e:
@@ -99,11 +101,12 @@ class CustomCartesiaSTTService(CartesiaSTTService):
                     chunk_to_send = self._audio_buffer[:self._buffer_size]
                     self._audio_buffer = self._audio_buffer[self._buffer_size:]
 
-                    new_frame = AudioRawFrame(
-                        audio=bytes(chunk_to_send),
-                        sample_rate=frame.sample_rate,
-                        num_channels=frame.num_channels
-                    )
+                    import copy
+                    new_frame = copy.copy(frame)
+                    new_frame.audio = bytes(chunk_to_send)
+                    if hasattr(new_frame, "num_frames"):
+                        new_frame.num_frames = int(len(new_frame.audio) / (new_frame.num_channels * 2))
+                        
                     await super().process_frame(new_frame, direction)
                 return
                 
