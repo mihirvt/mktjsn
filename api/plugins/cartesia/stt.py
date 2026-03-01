@@ -45,13 +45,12 @@ class CustomCartesiaSTTService(CartesiaSTTService):
 
             params = {
                 "model": self._model,
+                "language": self._language,
                 "encoding": self._encoding,
                 "sample_rate": str(self.sample_rate),
                 "min_volume": str(self._min_volume),
                 "max_silence_duration_secs": str(self._max_silence_duration_secs)
             }
-            if self._language and self._language not in ["multilingual", "multi"]:
-                params["language"] = self._language
             ws_url = f"wss://{self._base_url}/stt/websocket?{urllib.parse.urlencode(params)}"
             headers = {"Cartesia-Version": "2025-04-16", "X-API-Key": self._api_key}
 

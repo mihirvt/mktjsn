@@ -49,6 +49,7 @@ const TAB_CONFIG: { key: ServiceSegment; label: string }[] = [
 const LANGUAGE_DISPLAY_NAMES: Record<string, string> = {
     "multi": "Multilingual (Auto-detect)",
     "multilingual": "Multilingual (Auto-detect)",
+    "auto": "Auto-detect",
     // Arabic
     "ar": "Arabic",
     "ar-AE": "Arabic (UAE)",
