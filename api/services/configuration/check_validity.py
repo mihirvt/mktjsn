@@ -44,6 +44,7 @@ class UserConfigurationValidator:
             ServiceProviders.SPEECHMATICS.value: self._check_speechmatics_api_key,
             ServiceProviders.SMALLEST_AI.value: self._check_smallest_ai_api_key,
             ServiceProviders.DEEPINFRA.value: self._check_deepinfra_api_key,
+            ServiceProviders.SONIOX.value: self._check_soniox_api_key,
         }
 
     async def validate(self, configuration: UserConfiguration) -> APIKeyStatusResponse:
@@ -193,4 +194,7 @@ class UserConfigurationValidator:
         return True
 
     def _check_deepinfra_api_key(self, model: str, api_key: str) -> bool:
+        return True
+
+    def _check_soniox_api_key(self, model: str, api_key: str) -> bool:
         return True
