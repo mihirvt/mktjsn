@@ -26,6 +26,7 @@ class ServiceProviders(str, Enum):
     SPEECHMATICS = "speechmatics"
     SMALLEST_AI = "smallest_ai"
     DEEPINFRA = "deepinfra"
+    SONIOX = "soniox"
 
 
 class BaseServiceConfiguration(BaseModel):
@@ -758,6 +759,17 @@ class SpeechmaticsSTTConfiguration(BaseSTTConfiguration):
     api_key: str
 
 
+SONIOX_STT_MODELS = ["stt-rt-v4"]
+
+@register_stt
+class SonioxSTTConfiguration(BaseSTTConfiguration):
+    provider: Literal[ServiceProviders.SONIOX] = ServiceProviders.SONIOX
+    model: str = Field(
+        default="stt-rt-v4", json_schema_extra={"examples": SONIOX_STT_MODELS}
+    )
+    api_key: str
+
+
 STTConfig = Annotated[
     Union[
         DeepgramSTTConfiguration,
@@ -766,6 +778,7 @@ STTConfig = Annotated[
         DograhSTTService,
         SpeechmaticsSTTConfiguration,
         SarvamSTTConfiguration,
+        SonioxSTTConfiguration,
     ],
     Field(discriminator="provider"),
 ]

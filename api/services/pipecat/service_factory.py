@@ -175,6 +175,16 @@ def create_stt_service(
             ),
             sample_rate=audio_config.transport_in_sample_rate,
         )
+    elif user_config.stt.provider == ServiceProviders.SONIOX.value:
+        from pipecat.services.soniox.stt import SonioxInputParams, SonioxSTTService
+
+        params = SonioxInputParams(model=user_config.stt.model)
+
+        return SonioxSTTService(
+            api_key=user_config.stt.api_key,
+            params=params,
+            sample_rate=audio_config.transport_in_sample_rate,
+        )
     else:
         raise HTTPException(
             status_code=400, detail=f"Invalid STT provider {user_config.stt.provider}"
