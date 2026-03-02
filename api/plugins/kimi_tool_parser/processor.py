@@ -208,7 +208,16 @@ class KimiToolCallInterceptor(FrameProcessor):
                 
                 safe_to_flush = self._lookahead_buffer[:start_idx]
                 if safe_to_flush:
-                    await self.push_frame(TextFrame(safe_to_flush), direction)
+                    # Drop preamble text that precedes the tool call tag.
+                    # Kimi K2 / DeepInfra vLLM echoes the user's message back as
+                    # "thinking" text before emitting <function_calls>. Forwarding
+                    # this to TTS causes it to repeat the user's words aloud.
+                    # Silently discard it — it is model scratchpad, not speech.
+                    logger.debug(
+                        f"KimiToolCallInterceptor: Dropping pre-tool-call preamble "
+                        f"({len(safe_to_flush)} chars) to prevent TTS echo: "
+                        f"{repr(safe_to_flush[:80])}"
+                    )
 
                 self._is_buffering_tool = True
                 self._tool_call_buffer = self._lookahead_buffer[start_idx:]
