@@ -229,7 +229,10 @@ class PipecatEngine:
                             EndTaskReason.USER_QUALIFIED.value
                         )
 
-                result = {"status": "done"}
+                result = {
+                    "status": "success", 
+                    "instruction": "Node transition successful. Please read your updated system prompt and immediately provide the next response as per the new instructions."
+                }
 
                 properties = FunctionCallResultProperties(
                     on_context_updated=on_context_updated,
