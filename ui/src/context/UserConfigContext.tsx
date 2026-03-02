@@ -149,11 +149,21 @@ export function UserConfigProvider({ children }: { children: ReactNode }) {
         });
         if (response.error) {
             let msg = 'Failed to save user configuration';
-            const detail = (response.error as unknown as { detail?: { errors: { model: string; message: string }[] } }).detail;
-            if (Array.isArray(detail)) {
+            // FastAPI 422 returns: { detail: [{ loc: [...], msg: "...", type: "..." }] }
+            // FastAPI 500 returns: { detail: "some string" }
+            const errBody = response.error as unknown as { detail?: unknown };
+            const detail = errBody.detail;
+            if (Array.isArray(detail) && detail.length > 0) {
+                // Pydantic validation error array
                 msg = detail
-                    .map((e: { model: string; message: string }) => `${e.model}: ${e.message}`)
+                    .map((e: { loc?: (string | number)[]; msg?: string; message?: string; model?: string }) => {
+                        const location = e.loc ? e.loc.filter(s => s !== 'body').join('.') : (e.model ?? '');
+                        const message = e.msg ?? e.message ?? 'invalid';
+                        return `${location}: ${message}`;
+                    })
                     .join('\n');
+            } else if (typeof detail === 'string') {
+                msg = detail;
             }
             throw new Error(msg);
         }

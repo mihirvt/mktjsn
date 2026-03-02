@@ -676,21 +676,31 @@ export default function ServiceConfiguration() {
                 return value;
             };
 
+            // Radix Select always compares values as strings.
+            // Schema examples for integer fields (e.g. sample rates) are numbers,
+            // so we must stringify every option AND the current watched value.
+            const stringOptions = dropdownOptions.map((v: string | number) => String(v));
+            const watchedRaw = watch(`${service}_${field}`);
+            const watchedStr = watchedRaw !== undefined && watchedRaw !== null ? String(watchedRaw) : "";
+
             return (
                 <Select
-                    value={watch(`${service}_${field}`) as string || ""}
+                    value={watchedStr}
                     onValueChange={(value) => {
                         // Ignore empty string - Radix Select sometimes calls onValueChange('')
                         // when options change, even if current value is valid
                         if (!value) return;
-                        setValue(`${service}_${field}`, value, { shouldDirty: true });
+                        // For integer fields (sample rates), store as number so Pydantic is happy
+                        const num = Number(value);
+                        const stored = !isNaN(num) && String(num) === value ? num : value;
+                        setValue(`${service}_${field}`, stored, { shouldDirty: true });
                     }}
                 >
                     <SelectTrigger className="w-full">
                         <SelectValue placeholder={`Select ${field}`} />
                     </SelectTrigger>
                     <SelectContent>
-                        {dropdownOptions.map((value: string) => (
+                        {stringOptions.map((value: string) => (
                             <SelectItem key={value} value={value}>
                                 {getDisplayName(value)}
                             </SelectItem>

@@ -319,9 +319,10 @@ def create_tts_service(user_config, audio_config: "AudioConfig"):
         else:
             sample_rate = int(getattr(user_config.tts, "web_sample_rate", 48000) or 48000)
         language_code = getattr(user_config.tts, "language", "en-US") or "en-US"
-        master_speed = str(getattr(user_config.tts, "master_speed", "0") or "0")
-        master_pitch = str(getattr(user_config.tts, "master_pitch", "0") or "0")
-        master_volume = str(getattr(user_config.tts, "master_volume", "0") or "0")
+        # master_speed/pitch/volume are stored as float, API wants integer strings
+        master_speed = str(int(float(getattr(user_config.tts, "master_speed", 0) or 0)))
+        master_pitch = str(int(float(getattr(user_config.tts, "master_pitch", 0) or 0)))
+        master_volume = str(int(float(getattr(user_config.tts, "master_volume", 0) or 0)))
         stability = getattr(user_config.tts, "stability", None)
         similarity = getattr(user_config.tts, "similarity", None)
         pro_engine = getattr(user_config.tts, "pro_engine", None)
@@ -340,8 +341,9 @@ def create_tts_service(user_config, audio_config: "AudioConfig"):
                 master_speed=master_speed,
                 master_pitch=master_pitch,
                 master_volume=master_volume,
-                stability=str(stability) if stability is not None else None,
-                similarity=str(similarity) if similarity is not None else None,
+                # stability/similarity stored as float, API needs integer string "50"
+                stability=str(int(stability)) if stability is not None else None,
+                similarity=str(int(similarity)) if similarity is not None else None,
                 pro_engine=pro_engine if pro_engine else None,
                 accent_code=accent_code if accent_code else None,
             ),

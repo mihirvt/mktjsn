@@ -578,27 +578,33 @@ class VoicemakerTTSConfiguration(BaseTTSConfiguration):
         json_schema_extra={"examples": VOICEMAKER_WEB_SAMPLE_RATES},
         description="Sample rate for web/WebRTC calls (22050, 24000, 44100, 48000 Hz)",
     )
-    # Optional quality tuning
-    master_speed: str = Field(
-        default="0",
+    # Optional quality tuning – stored as numbers, converted to strings when calling the API
+    master_speed: float = Field(
+        default=0.0,
+        ge=-100.0,
+        le=100.0,
         description="Speed adjustment: -100 to 100 (0 = normal)",
     )
-    master_pitch: str = Field(
-        default="0",
+    master_pitch: float = Field(
+        default=0.0,
+        ge=-100.0,
+        le=100.0,
         description="Pitch adjustment: -100 to 100 (0 = normal)",
     )
-    master_volume: str = Field(
-        default="0",
+    master_volume: float = Field(
+        default=0.0,
+        ge=-20.0,
+        le=20.0,
         description="Volume adjustment: -20 to 20 (0 = normal)",
     )
-    # ProPlus-only (optional)
-    stability: Union[str, None] = Field(
+    # ProPlus-only (optional floats so the UI can pass numbers directly)
+    stability: Union[float, None] = Field(
         default=None,
-        description="Stability 0–100 (ProPlus voices only)",
+        description="Stability 0-100 (ProPlus voices only)",
     )
-    similarity: Union[str, None] = Field(
+    similarity: Union[float, None] = Field(
         default=None,
-        description="Similarity 0–100 (ProPlus voices only)",
+        description="Similarity 0-100 (ProPlus voices only)",
     )
     pro_engine: Union[str, None] = Field(
         default=None,
