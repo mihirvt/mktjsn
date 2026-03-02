@@ -121,21 +121,40 @@ class UserConfigurationValidator:
         if cache_key in self._provider_api_key_validity_status:
             return self._provider_api_key_validity_status[cache_key]
 
-        deepgram = DeepgramClient(api_key)
-        dg_connection = deepgram.listen.websocket.v("1")
-
         try:
-            options = LiveOptions(
-                model="nova-2",
-                language="en-US",
-                smart_format=True,
-            )
+            deepgram = DeepgramClient(api_key)
+            dg_connection = deepgram.listen.websocket.v("1")
 
-            connected = dg_connection.start(options)
-            self._provider_api_key_validity_status[cache_key] = connected
-        finally:
-            dg_connection.finish()
-        return self._provider_api_key_validity_status[cache_key]
+            try:
+                options = LiveOptions(
+                    model="nova-2",
+                    language="en-US",
+                    smart_format=True,
+                )
+                connected = dg_connection.start(options)
+                self._provider_api_key_validity_status[cache_key] = connected
+            finally:
+                dg_connection.finish()
+        except Exception as e:
+            # Avoid false "invalid key" errors for transient network/provider issues.
+            # Treat explicit auth failures as invalid; soft-pass other failures.
+            message = str(e).lower()
+            auth_failure_markers = [
+                "invalid api key",
+                "authentication",
+                "unauthorized",
+                "forbidden",
+                "permission denied",
+                "401",
+                "403",
+            ]
+            is_auth_failure = any(marker in message for marker in auth_failure_markers)
+            self._provider_api_key_validity_status[cache_key] = not is_auth_failure
+            logger.warning(
+                "Deepgram key validation failed with non-auth-safe fallback. "
+                f"auth_failure={is_auth_failure}, error={e}"
+            )
+        return self._provider_api_key_validity_status.get(cache_key, True)
 
     def _check_groq_api_key(self, model: str, api_key: str) -> bool:
         cache_key = f"{model}:{api_key}"

@@ -60,15 +60,27 @@ _MAX_PARTIAL_TAG_LEN = max(len(t) for t in _TAG_STARTS) + 2
 
 # ── Parsing helpers ────────────────────────────────────────────────────────────
 
-def extract_tool_call_info(tool_call_rsp: str):
+def extract_tool_call_info(tool_call_rsp: str, start_idx: int = 0):
     """Parse Kimi K2 raw tool call tags into structured tool call dicts.
 
     Supports both Moonshot native format (``<|tool_calls_section_begin|>``)
     and DeepInfra/vLLM fallback format (``<function_calls>``).
+
+    CRITICAL: Kimi K2 requires tool_call IDs in the format
+    ``functions.func_name:idx`` where idx is a global counter starting
+    at 0 that increments with each function invocation across the entire
+    conversation. Using random IDs (like ``call_abc123``) causes Kimi K2
+    to "crash" on subsequent turns — it dumps raw tokens into content
+    instead of making proper tool calls.
+
+    Args:
+        tool_call_rsp: Raw text containing tool call XML/tags.
+        start_idx: The starting global counter for tool call IDs.
     """
     tool_calls = []
+    idx = start_idx
 
-    # 1. Moonshot native format
+    # 1. Moonshot native format — IDs are already in correct format
     if "<|tool_call_begin|>" in tool_call_rsp:
         func_call_pattern = (
             r"\<\|tool_call_begin\|\>\s*(?P<tool_call_id>[\w\.]+:\d+)\s*"
@@ -85,11 +97,10 @@ def extract_tool_call_info(tool_call_rsp: str):
                     "function": {"name": function_name, "arguments": function_args},
                 }
             )
+            idx += 1
 
-    # 2. DeepInfra / vLLM fallback format
+    # 2. DeepInfra / vLLM fallback format — generate proper Kimi IDs
     if "<function_calls>" in tool_call_rsp:
-        import uuid
-
         # Try wrapped section first
         sections = re.findall(
             r"<function_calls>(.*?)</function_calls>", tool_call_rsp, re.DOTALL
@@ -108,11 +119,12 @@ def extract_tool_call_info(tool_call_rsp: str):
                     args[k] = v.strip()
             tool_calls.append(
                 {
-                    "id": f"call_{uuid.uuid4().hex[:8]}",
+                    "id": f"functions.{func_name}:{idx}",
                     "type": "function",
                     "function": {"name": func_name, "arguments": json.dumps(args)},
                 }
             )
+            idx += 1
 
         # <invoke name="func_name"/>  (self-closing, no args)
         self_closing = re.findall(
@@ -121,11 +133,12 @@ def extract_tool_call_info(tool_call_rsp: str):
         for func_name in self_closing:
             tool_calls.append(
                 {
-                    "id": f"call_{uuid.uuid4().hex[:8]}",
+                    "id": f"functions.{func_name}:{idx}",
                     "type": "function",
                     "function": {"name": func_name, "arguments": json.dumps({})},
                 }
             )
+            idx += 1
 
     return tool_calls
 
@@ -158,6 +171,10 @@ class KimiToolCallInterceptor(FrameProcessor):
         self._flushed_preamble_tokens = False
         # Latest LLM context for constructing FunctionCallFromLLM
         self._latest_context = None
+        # Global counter for Kimi K2 tool call IDs (functions.name:idx)
+        # CRITICAL: Kimi K2 requires sequential IDs starting at 0.
+        # Using random IDs causes the model to crash on subsequent turns.
+        self._tool_call_counter = 0
 
     def _reset_state(self):
         """Reset all interceptor state. Called at start of each LLM response."""
@@ -283,9 +300,11 @@ class KimiToolCallInterceptor(FrameProcessor):
         """Parse the buffered tool-call XML and execute via the LLM service."""
         logger.debug(
             f"KimiToolCallInterceptor: Buffer complete ({len(self._tool_call_buffer)} chars), "
-            f"parsing..."
+            f"parsing... (tool_call_counter={self._tool_call_counter})"
         )
-        tool_calls = extract_tool_call_info(self._tool_call_buffer)
+        tool_calls = extract_tool_call_info(
+            self._tool_call_buffer, start_idx=self._tool_call_counter
+        )
 
         if tool_calls and self._llm and hasattr(self._llm, "run_function_calls"):
             try:
@@ -303,9 +322,11 @@ class KimiToolCallInterceptor(FrameProcessor):
                             arguments=tool_args,
                         )
                     )
+                # Increment the global counter by the number of tool calls
+                self._tool_call_counter += len(tool_calls)
                 logger.info(
                     f"KimiToolCallInterceptor: Submitting {len(calls_to_run)} "
-                    f"function call(s): {[c.function_name for c in calls_to_run]}"
+                    f"function call(s): {[(c.function_name, c.tool_call_id) for c in calls_to_run]}"
                 )
                 await self.push_frame(
                     FunctionCallsFromLLMInfoFrame(function_calls=calls_to_run),
