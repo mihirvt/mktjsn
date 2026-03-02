@@ -1,3 +1,23 @@
+"""Kimi K2 Tool Call Interceptor for Pipecat.
+
+Kimi K2 on DeepInfra / Groq does NOT support standard OpenAI-compatible
+``delta.tool_calls`` streaming. Instead it emits tool calls as raw XML text
+inside ``delta.content``.  This interceptor sits between the LLM and TTS in
+the pipeline and:
+
+  1. Passes normal text through with **zero latency** (no buffering).
+  2. Detects ``<function_calls>`` (vLLM format) or ``<|tool_calls_section_begin|>``
+     (Moonshot native format) in the text stream.
+  3. When a tool call tag is detected:
+       a. Drops the "preamble" text (echo of user words the model generates
+          before the tag).
+       b. Pushes an ``InterruptionFrame`` to cancel any preamble audio TTS
+          may already be processing AND to reset the ``LLMAssistantAggregator``
+          so the preamble does not pollute conversation context.
+       c. Buffers the remainder of the tool call XML until the closing tag.
+       d. Parses and executes the tool call via the LLM's ``run_function_calls``.
+"""
+
 import json
 import re
 
@@ -6,32 +26,49 @@ from loguru import logger
 from pipecat.frames.frames import (
     TextFrame,
     Frame,
+    InterruptionFrame,
+    LLMFullResponseEndFrame,
+    LLMContextFrame,
+    FunctionCallsFromLLMInfoFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-# We use pipecat's new LLMToolCallFrame style if available, else we handle it correctly.
-# Currently pipecat has varying function call frame formats but Kimi outputs it exactly like Pipecat's internal format
-# if we just parse the json.
+
 try:
-    from pipecat.frames.frames import (
-        LLMFullResponseStartFrame,
-        LLMFullResponseEndFrame,
-        UserStartedSpeakingFrame,
-        InterruptionFrame,
-        LLMContextFrame
-    )
     from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
     from pipecat.services.llm_service import FunctionCallFromLLM
-    from pipecat.frames.frames import FunctionCallsFromLLMInfoFrame
 except ImportError:
     pass
 
+
+# ── Tag constants ──────────────────────────────────────────────────────────────
+
+# vLLM / DeepInfra format
+_VLLM_TAG_START = "<function_calls>"
+_VLLM_TAG_END = "</function_calls>"
+
+# Moonshot native format
+_MOON_TAG_START = "<|tool_calls_section_begin|>"
+_MOON_TAG_END = "<|tool_calls_section_end|>"
+
+# Union of start-tag prefixes for partial detection
+_TAG_STARTS = [_VLLM_TAG_START, _MOON_TAG_START]
+
+# Maximum partial-tag prefix to hold (longest start tag + margin)
+_MAX_PARTIAL_TAG_LEN = max(len(t) for t in _TAG_STARTS) + 2
+
+
+# ── Parsing helpers ────────────────────────────────────────────────────────────
+
 def extract_tool_call_info(tool_call_rsp: str):
+    """Parse Kimi K2 raw tool call tags into structured tool call dicts.
+
+    Supports both Moonshot native format (``<|tool_calls_section_begin|>``)
+    and DeepInfra/vLLM fallback format (``<function_calls>``).
+    """
     tool_calls = []
-    
-    # 1. Moonshot Native Format
-    if '<|tool_call_begin|>' in tool_call_rsp or '<|tool_calls_section_begin|>' in tool_call_rsp:
-        # Some providers may omit section end tokens. Parse tool_call blocks directly from
-        # the full text instead of requiring wrapper tags to be complete.
+
+    # 1. Moonshot native format
+    if "<|tool_call_begin|>" in tool_call_rsp:
         func_call_pattern = (
             r"\<\|tool_call_begin\|\>\s*(?P<tool_call_id>[\w\.]+:\d+)\s*"
             r"\<\|tool_call_argument_begin\|\>\s*(?P<function_arguments>.*?)\s*"
@@ -39,134 +76,91 @@ def extract_tool_call_info(tool_call_rsp: str):
         )
         for match in re.findall(func_call_pattern, tool_call_rsp, re.DOTALL):
             function_id, function_args = match
-            function_name = function_id.split('.')[1].split(':')[0]
-            tool_calls.append({
-                "id": function_id,
-                "type": "function",
-                "function": {
-                    "name": function_name,
-                    "arguments": function_args
+            function_name = function_id.split(".")[1].split(":")[0]
+            tool_calls.append(
+                {
+                    "id": function_id,
+                    "type": "function",
+                    "function": {"name": function_name, "arguments": function_args},
                 }
-            })
-                
+            )
+
     # 2. DeepInfra / vLLM fallback format
-    if '<function_calls>' in tool_call_rsp:
-        pattern = r"<function_calls>(.*?)</function_calls>"
-        sections = re.findall(pattern, tool_call_rsp, re.DOTALL)
-        if sections:
-            import uuid
-            block = sections[0]
-            invokes = re.findall(r'<invoke\s+name="([^"]+)"\s*>(.*?)</invoke>', block, re.DOTALL)
-            for func_name, args_block in invokes:
-                args = {}
-                if args_block and args_block.strip():
-                    arg_matches = re.findall(r'<([^>]+)>(.*?)</\1>', args_block, re.DOTALL)
-                    for k, v in arg_matches:
-                        args[k] = v.strip()
-                tool_calls.append({
-                    "id": f"call_{uuid.uuid4().hex[:8]}",
-                    "type": "function",
-                    "function": {
-                        "name": func_name,
-                        "arguments": json.dumps(args)
-                    }
-                })
+    if "<function_calls>" in tool_call_rsp:
+        import uuid
 
-            # Also support self-closing invoke tags with no args.
-            self_closing_invokes = re.findall(r'<invoke\s+name="([^"]+)"\s*/>', block, re.DOTALL)
-            for func_name in self_closing_invokes:
-                tool_calls.append({
-                    "id": f"call_{uuid.uuid4().hex[:8]}",
-                    "type": "function",
-                    "function": {
-                        "name": func_name,
-                        "arguments": json.dumps({})
-                    }
-                })
-        else:
-            # Fallback when wrapper is incomplete/missing close tag:
-            # parse invoke blocks directly from full text.
-            import uuid
-            invokes = re.findall(
-                r'<invoke\s+name="([^"]+)"\s*>(.*?)</invoke>',
-                tool_call_rsp,
-                re.DOTALL,
-            )
-            for func_name, args_block in invokes:
-                args = {}
-                if args_block and args_block.strip():
-                    arg_matches = re.findall(r'<([^>]+)>(.*?)</\1>', args_block, re.DOTALL)
-                    for k, v in arg_matches:
-                        args[k] = v.strip()
-                tool_calls.append({
-                    "id": f"call_{uuid.uuid4().hex[:8]}",
-                    "type": "function",
-                    "function": {
-                        "name": func_name,
-                        "arguments": json.dumps(args)
-                    }
-                })
+        # Try wrapped section first
+        sections = re.findall(
+            r"<function_calls>(.*?)</function_calls>", tool_call_rsp, re.DOTALL
+        )
+        block = sections[0] if sections else tool_call_rsp
 
-            self_closing_invokes = re.findall(
-                r'<invoke\s+name="([^"]+)"\s*/>',
-                tool_call_rsp,
-                re.DOTALL,
-            )
-            for func_name in self_closing_invokes:
-                tool_calls.append({
+        # <invoke name="func_name">args</invoke>
+        invokes = re.findall(
+            r'<invoke\s+name="([^"]+)"\s*>(.*?)</invoke>', block, re.DOTALL
+        )
+        for func_name, args_block in invokes:
+            args = {}
+            if args_block and args_block.strip():
+                arg_matches = re.findall(r"<([^>]+)>(.*?)</\1>", args_block, re.DOTALL)
+                for k, v in arg_matches:
+                    args[k] = v.strip()
+            tool_calls.append(
+                {
                     "id": f"call_{uuid.uuid4().hex[:8]}",
                     "type": "function",
-                    "function": {
-                        "name": func_name,
-                        "arguments": json.dumps({})
-                    }
-                })
+                    "function": {"name": func_name, "arguments": json.dumps(args)},
+                }
+            )
+
+        # <invoke name="func_name"/>  (self-closing, no args)
+        self_closing = re.findall(
+            r'<invoke\s+name="([^"]+)"\s*/>', block, re.DOTALL
+        )
+        for func_name in self_closing:
+            tool_calls.append(
+                {
+                    "id": f"call_{uuid.uuid4().hex[:8]}",
+                    "type": "function",
+                    "function": {"name": func_name, "arguments": json.dumps({})},
+                }
+            )
 
     return tool_calls
 
 
-# Characters that mark the end of a spoken sentence/clause.
-# We flush the lookahead buffer only at these boundaries so that the preamble
-# echoed by Kimi K2 before <function_calls> (which is never a complete sentence)
-# stays buffered long enough for the tag to be detected and dropped.
-_SENTENCE_END_CHARS = frozenset(['।', '.', '?', '!'])
-
-# Safety valve: if the lookahead buffer exceeds this many chars with no sentence
-# boundary, force-flush to avoid starving TTS on legitimately long unpunctuated text.
-_MAX_LOOKAHEAD_CHARS = 400
-
-
-def _last_sentence_boundary(text: str) -> int:
-    """Return the index just AFTER the last sentence-ending char, or 0 if none."""
-    for i in range(len(text) - 1, -1, -1):
-        if text[i] in _SENTENCE_END_CHARS:
-            return i + 1
-    return 0
-
+# ── Interceptor ────────────────────────────────────────────────────────────────
 
 class KimiToolCallInterceptor(FrameProcessor):
-    """
-    Kimi K2 outputs raw string tags instead of OpenAI standard JSON tool calls.
-    This processor captures TextFrames that start Kimi tags, buffers them,
-    parses them upon completion, and emits standard pipecat LLM Tool Call frames.
+    """Zero-latency interceptor for Kimi K2 raw-text tool calls.
 
-    Key design: text is NOT flushed to TTS on every token. Instead it accumulates
-    in a lookahead buffer and is released only at sentence boundaries (. ? ! ।).
-    This ensures that the preamble Kimi K2 emits before <function_calls> — which
-    always echoes the user's words and never ends with sentence punctuation — stays
-    buffered until the tag is detected, at which point it is silently dropped.
+    Design:
+      * Normal text passes through **immediately** — no buffering.
+      * Only holds back a short ``<…`` partial when it might be a tag start.
+      * When a full tag is confirmed the preamble is dropped, an
+        ``InterruptionFrame`` cancels any TTS/context that already received
+        leaked preamble tokens, and the tool call is executed.
     """
+
     def __init__(self, llm=None):
         super().__init__()
         self._llm = llm
+        # True once we've detected a tool-call start tag and are collecting XML
         self._is_buffering_tool = False
         self._tool_call_buffer = ""
+        # Small lookahead used ONLY for partial-tag detection
         self._lookahead_buffer = ""
+        # Track whether any preamble tokens were already flushed downstream
+        self._flushed_preamble_tokens = False
+        # Latest LLM context for constructing FunctionCallFromLLM
         self._latest_context = None
+
+    # ── Main dispatch ──────────────────────────────────────────────────────
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
+        # Capture the latest context so tool calls can reference it
         if direction == FrameDirection.DOWNSTREAM:
             try:
                 if isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
@@ -174,161 +168,155 @@ class KimiToolCallInterceptor(FrameProcessor):
             except NameError:
                 pass
 
+        # Only intercept downstream TextFrames
         if direction == FrameDirection.DOWNSTREAM and isinstance(frame, TextFrame):
-            text = frame.text
-
-            # ── Phase 1: already inside a tool call block ──────────────────────
-            if self._is_buffering_tool:
-                self._tool_call_buffer += text
-                
-                # If we've hit the end tag, parse and emit
-                has_moonshot_end = "<|tool_calls_section_end|>" in self._tool_call_buffer
-                has_vllm_end = "</function_calls>" in self._tool_call_buffer
-
-                if has_moonshot_end or has_vllm_end:
-                    logger.debug(f"KimiToolCallInterceptor: Buffer complete, parsing...")
-                    tool_calls = extract_tool_call_info(self._tool_call_buffer)
-                    if tool_calls:
-                        if self._llm and hasattr(self._llm, 'run_function_calls'):
-                            try:
-                                calls_to_run = []
-                                for tc in tool_calls:
-                                    tool_name = tc.get("function", {}).get("name", "")
-                                    args_raw = tc.get("function", {}).get("arguments", "{}")
-                                    tool_args = json.loads(args_raw) if args_raw else {}
-                                    tool_id = tc.get("id", "")
-                                    calls_to_run.append(FunctionCallFromLLM(
-                                        context=self._latest_context,
-                                        tool_call_id=tool_id,
-                                        function_name=tool_name,
-                                        arguments=tool_args
-                                    ))
-                                
-                                logger.info(f"KimiToolCallInterceptor: Submitting {len(calls_to_run)} function calls to LLM service")
-                                # Send info frame down for observers (e.g. realtime feedback)
-                                await self.push_frame(FunctionCallsFromLLMInfoFrame(function_calls=calls_to_run), direction)
-                                # Execute function calls on the underlying LLM
-                                await self._llm.run_function_calls(calls_to_run)
-                            except Exception as e:
-                                logger.error(f"KimiToolCallInterceptor: Failed to run function calls: {e}")
-                        else:
-                            logger.error("KimiToolCallInterceptor: LLM reference missing or does not have run_function_calls")
-                    else:
-                        logger.warning(f"KimiToolCallInterceptor: Failed to parse buffered tool call tags: {self._tool_call_buffer}")
-
-                    # Reset state
-                    self._is_buffering_tool = False
-                    self._tool_call_buffer = ""
-                
-                # Consume this TextFrame — never let tool call text reach TTS
-                return
-
-            # ── Phase 2: not yet in a tool call — accumulate lookahead buffer ──
-            #
-            # We do NOT flush on every token. Instead we accumulate and only flush
-            # at sentence-ending characters. This is the core fix: Kimi K2's
-            # pre-tool-call preamble never ends with punctuation, so it stays
-            # buffered until we detect <function_calls> and can drop it cleanly.
-            self._lookahead_buffer += text
-
-            # Check if a complete tool call start tag is now in the buffer
-            if "<|tool_calls_section_begin|>" in self._lookahead_buffer or "<function_calls>" in self._lookahead_buffer:
-                tag_idx1 = self._lookahead_buffer.find("<|tool_calls_section_begin|>")
-                tag_idx2 = self._lookahead_buffer.find("<function_calls>")
-                start_idx = tag_idx1 if tag_idx1 != -1 else tag_idx2
-
-                preamble = self._lookahead_buffer[:start_idx]
-                if preamble:
-                    logger.debug(
-                        f"KimiToolCallInterceptor: Dropping pre-tool-call preamble "
-                        f"({len(preamble)} chars) to prevent TTS echo: "
-                        f"{repr(preamble[:80])}"
-                    )
-
-                self._is_buffering_tool = True
-                self._tool_call_buffer = self._lookahead_buffer[start_idx:]
-                self._lookahead_buffer = ""
-                logger.debug(f"KimiToolCallInterceptor: Triggered, buffering tool call stream.")
-                return
-
-            # Check for partial tag prefixes — hold them back but flush confirmed-
-            # safe text before them at sentence boundaries.
-            last_lt = self._lookahead_buffer.rfind('<')
-            if last_lt != -1:
-                possible_tag = self._lookahead_buffer[last_lt:]
-                if len(possible_tag) < 30 and (
-                    "<|tool_calls_section_begin|>".startswith(possible_tag) or
-                    "<function_calls>".startswith(possible_tag)
-                ):
-                    # Text before last_lt is safe. Flush it only at a sentence boundary
-                    # so we don't hold normal speech too long.
-                    safe_region = self._lookahead_buffer[:last_lt]
-                    flush_idx = _last_sentence_boundary(safe_region)
-                    if flush_idx > 0:
-                        to_flush = safe_region[:flush_idx]
-                        remainder = safe_region[flush_idx:]
-                        if to_flush.strip():
-                            await self.push_frame(TextFrame(to_flush), direction)
-                        self._lookahead_buffer = remainder + possible_tag
-                    # else: keep holding — no sentence boundary before the partial tag yet
-                    return
-
-            # No tool call tags or partial starts. Flush at sentence boundaries.
-            flush_idx = _last_sentence_boundary(self._lookahead_buffer)
-            if flush_idx > 0:
-                to_flush = self._lookahead_buffer[:flush_idx]
-                self._lookahead_buffer = self._lookahead_buffer[flush_idx:]
-                if to_flush.strip():
-                    await self.push_frame(TextFrame(to_flush), direction)
-            elif len(self._lookahead_buffer) > _MAX_LOOKAHEAD_CHARS:
-                # Safety valve: force-flush if buffer is very large with no sentence boundary.
-                logger.debug(
-                    f"KimiToolCallInterceptor: Force-flushing oversized lookahead buffer "
-                    f"({len(self._lookahead_buffer)} chars)"
-                )
-                if self._lookahead_buffer.strip():
-                    await self.push_frame(TextFrame(self._lookahead_buffer), direction)
-                self._lookahead_buffer = ""
-
+            await self._handle_text(frame, direction)
             return
 
+        # LLMFullResponseEndFrame — finalize any pending tool buffer
+        if (
+            direction == FrameDirection.DOWNSTREAM
+            and isinstance(frame, LLMFullResponseEndFrame)
+        ):
+            await self._handle_response_end(frame, direction)
+            return
+
+        # Everything else passes through
+        await self.push_frame(frame, direction)
+
+    # ── Text handling ──────────────────────────────────────────────────────
+
+    async def _handle_text(self, frame: TextFrame, direction: FrameDirection):
+        text = frame.text
+
+        # Phase 1: already inside a tool-call XML block — keep buffering
+        if self._is_buffering_tool:
+            self._tool_call_buffer += text
+            if _MOON_TAG_END in self._tool_call_buffer or _VLLM_TAG_END in self._tool_call_buffer:
+                await self._finalize_tool_call(direction)
+            return
+
+        # Phase 2: normal text — check for tool-call tag start
+        self._lookahead_buffer += text
+
+        # Check for a complete start tag
+        has_moon = _MOON_TAG_START in self._lookahead_buffer
+        has_vllm = _VLLM_TAG_START in self._lookahead_buffer
+        if has_moon or has_vllm:
+            tag = _MOON_TAG_START if has_moon else _VLLM_TAG_START
+            start_idx = self._lookahead_buffer.find(tag)
+
+            preamble = self._lookahead_buffer[:start_idx]
+
+            if preamble or self._flushed_preamble_tokens:
+                total_preamble = preamble
+                logger.debug(
+                    f"KimiToolCallInterceptor: Dropping pre-tool-call preamble "
+                    f"({len(total_preamble)} chars in buffer): {repr(total_preamble[:80])}"
+                )
+                # Cancel any preamble tokens that already reached TTS / aggregator.
+                # InterruptionFrame tells:
+                #   - TTS to cancel audio for preamble text
+                #   - LLMAssistantAggregator to reset (clearing preamble from context)
+                if self._flushed_preamble_tokens:
+                    logger.debug(
+                        "KimiToolCallInterceptor: Pushing InterruptionFrame to "
+                        "cancel already-flushed preamble in TTS/aggregator"
+                    )
+                    await self.push_frame(InterruptionFrame(), direction)
+
+            self._is_buffering_tool = True
+            self._tool_call_buffer = self._lookahead_buffer[start_idx:]
+            self._lookahead_buffer = ""
+            self._flushed_preamble_tokens = False
+            logger.debug("KimiToolCallInterceptor: Triggered, buffering tool call stream.")
+            return
+
+        # Check for a partial tag start — hold back only the '<' or '<|' portion
+        last_lt = self._lookahead_buffer.rfind("<")
+        if last_lt != -1:
+            possible_partial = self._lookahead_buffer[last_lt:]
+            if len(possible_partial) < _MAX_PARTIAL_TAG_LEN and any(
+                tag.startswith(possible_partial) for tag in _TAG_STARTS
+            ):
+                # Flush everything BEFORE the partial tag immediately
+                safe = self._lookahead_buffer[:last_lt]
+                if safe:
+                    self._flushed_preamble_tokens = True
+                    await self.push_frame(TextFrame(safe), direction)
+                self._lookahead_buffer = possible_partial
+                return
+
+        # No tag speculation — flush everything (zero latency path)
+        if self._lookahead_buffer:
+            if self._lookahead_buffer.strip():
+                self._flushed_preamble_tokens = True
+                await self.push_frame(TextFrame(self._lookahead_buffer), direction)
+            self._lookahead_buffer = ""
+
+    # ── Tool call finalization ─────────────────────────────────────────────
+
+    async def _finalize_tool_call(self, direction: FrameDirection):
+        """Parse the buffered tool-call XML and execute via the LLM service."""
+        logger.debug("KimiToolCallInterceptor: Buffer complete, parsing...")
+        tool_calls = extract_tool_call_info(self._tool_call_buffer)
+
+        if tool_calls and self._llm and hasattr(self._llm, "run_function_calls"):
+            try:
+                calls_to_run = []
+                for tc in tool_calls:
+                    tool_name = tc.get("function", {}).get("name", "")
+                    args_raw = tc.get("function", {}).get("arguments", "{}")
+                    tool_args = json.loads(args_raw) if args_raw else {}
+                    tool_id = tc.get("id", "")
+                    calls_to_run.append(
+                        FunctionCallFromLLM(
+                            context=self._latest_context,
+                            tool_call_id=tool_id,
+                            function_name=tool_name,
+                            arguments=tool_args,
+                        )
+                    )
+                logger.info(
+                    f"KimiToolCallInterceptor: Submitting {len(calls_to_run)} "
+                    f"function calls to LLM service"
+                )
+                await self.push_frame(
+                    FunctionCallsFromLLMInfoFrame(function_calls=calls_to_run),
+                    direction,
+                )
+                await self._llm.run_function_calls(calls_to_run)
+            except Exception as e:
+                logger.error(f"KimiToolCallInterceptor: Failed to run function calls: {e}")
+        elif tool_calls:
+            logger.error(
+                "KimiToolCallInterceptor: LLM reference missing or lacks run_function_calls"
+            )
         else:
-            # Non-Text frames (or upstream frames) pass through.
-            # For LLMFullResponseEndFrame: flush any remaining lookahead buffer.
-            from pipecat.frames.frames import LLMFullResponseEndFrame
-            if direction == FrameDirection.DOWNSTREAM and isinstance(frame, LLMFullResponseEndFrame):
-                # Groq/vLLM can occasionally truncate or omit section-end tags.
-                # Finalize any buffered tool payload at end-of-response.
-                if self._is_buffering_tool and self._tool_call_buffer:
-                    logger.debug("KimiToolCallInterceptor: Finalizing buffered tool payload on response end")
-                    tool_calls = extract_tool_call_info(self._tool_call_buffer)
-                    if tool_calls and self._llm and hasattr(self._llm, 'run_function_calls'):
-                        try:
-                            calls_to_run = []
-                            for tc in tool_calls:
-                                tool_name = tc.get("function", {}).get("name", "")
-                                args_raw = tc.get("function", {}).get("arguments", "{}")
-                                tool_args = json.loads(args_raw) if args_raw else {}
-                                tool_id = tc.get("id", "")
-                                calls_to_run.append(FunctionCallFromLLM(
-                                    context=self._latest_context,
-                                    tool_call_id=tool_id,
-                                    function_name=tool_name,
-                                    arguments=tool_args
-                                ))
-                            await self.push_frame(FunctionCallsFromLLMInfoFrame(function_calls=calls_to_run), direction)
-                            await self._llm.run_function_calls(calls_to_run)
-                        except Exception as e:
-                            logger.error(f"KimiToolCallInterceptor: Failed to finalize run_function_calls: {e}")
-                    else:
-                        logger.debug("KimiToolCallInterceptor: No parsable tool calls found in final buffered payload")
-                    self._is_buffering_tool = False
-                    self._tool_call_buffer = ""
+            logger.warning(
+                f"KimiToolCallInterceptor: Failed to parse buffered tool call: "
+                f"{self._tool_call_buffer[:200]}"
+            )
 
-                # Flush any remaining lookahead text (tail of a normal response)
-                if self._lookahead_buffer:
-                    if self._lookahead_buffer.strip():
-                        await self.push_frame(TextFrame(self._lookahead_buffer), direction)
-                    self._lookahead_buffer = ""
+        self._is_buffering_tool = False
+        self._tool_call_buffer = ""
+        self._flushed_preamble_tokens = False
 
-            await self.push_frame(frame, direction)
+    # ── Response-end handling ──────────────────────────────────────────────
+
+    async def _handle_response_end(self, frame: Frame, direction: FrameDirection):
+        """Handle LLMFullResponseEndFrame: finalize any pending tool buffer."""
+        if self._is_buffering_tool and self._tool_call_buffer:
+            logger.debug(
+                "KimiToolCallInterceptor: Finalizing buffered tool payload on response end"
+            )
+            await self._finalize_tool_call(direction)
+
+        # Flush any remaining lookahead text (e.g. trailing text with no tag)
+        if self._lookahead_buffer:
+            if self._lookahead_buffer.strip():
+                await self.push_frame(TextFrame(self._lookahead_buffer), direction)
+            self._lookahead_buffer = ""
+
+        self._flushed_preamble_tokens = False
+        await self.push_frame(frame, direction)
