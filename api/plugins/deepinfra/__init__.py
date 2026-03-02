@@ -69,7 +69,39 @@ class DeepInfraLLMService(OpenAILLMService):
         if self._settings["max_completion_tokens"]:
             params["max_completion_tokens"] = self._settings["max_completion_tokens"]
 
-        # Add messages, tools, tool_choice from context
-        params.update(params_from_context)
+        # Handle Kimi K2's requirement for sequential tool call IDs
+        # (functions.func_name:idx) instead of standard random UUIDs
+        if getattr(self, "model_name", "").lower().startswith("moonshotai/kimi"):
+            import copy
+            messages = copy.deepcopy(params_from_context.get("messages", []))
+            
+            id_map = {}
+            global_idx = 0
+            
+            for msg in messages:
+                # Assistant messages making tool_calls
+                if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                    for tc in msg.get("tool_calls", []):
+                        if tc.get("type") == "function":
+                            func_name = tc.get("function", {}).get("name", "")
+                            old_id = tc.get("id")
+                            if old_id and old_id not in id_map:
+                                new_id = f"functions.{func_name}:{global_idx}"
+                                id_map[old_id] = new_id
+                                global_idx += 1
+                            if old_id in id_map:
+                                tc["id"] = id_map[old_id]
+                
+                # Tool messages returning the results
+                elif msg.get("role") == "tool":
+                    old_id = msg.get("tool_call_id")
+                    if old_id in id_map:
+                        msg["tool_call_id"] = id_map[old_id]
+                        
+            params_copy = dict(params_from_context)
+            params_copy["messages"] = messages
+            params.update(params_copy)
+        else:
+            params.update(params_from_context)
 
         return params

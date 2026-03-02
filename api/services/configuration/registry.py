@@ -179,10 +179,6 @@ class GroqLLMService(BaseLLMConfiguration):
         default=0.6, ge=0.0, le=2.0,
         description="Sampling temperature (0 = focused, 2 = creative)",
     )
-    enable_kimi_tool_parser: bool = Field(
-        default=False, 
-        description="Check to enable Kimi K2's custom text-tag tool parsing when using the Kimi model through Groq."
-    )
 
 
 @register_llm
@@ -250,10 +246,6 @@ class DeepInfraLLMConfiguration(BaseLLMConfiguration):
     reasoning_effort: str = Field(
         default="none",
         json_schema_extra={"examples": DEEPINFRA_REASONING_EFFORTS},
-    )
-    enable_kimi_tool_parser: bool = Field(
-        default=False, 
-        description="Check to enable Kimi K2's custom text-tag tool parsing when using the Kimi model through DeepInfra."
     )
     api_key: str
 

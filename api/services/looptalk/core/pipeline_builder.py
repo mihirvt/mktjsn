@@ -152,10 +152,6 @@ class LoopTalkPipelineBuilder:
             llm,
         ]
 
-        if hasattr(llm, "_kimi_interceptor") and llm._kimi_interceptor:
-            logger.info("Adding KimiToolCallInterceptor to loopTalk pipeline")
-            processors.append(llm._kimi_interceptor)
-
         processors.extend([
             pipeline_engine_callback_processor,
             tts,

@@ -73,10 +73,6 @@ def build_pipeline(
         ]
     )
 
-    if hasattr(llm, "_kimi_interceptor") and llm._kimi_interceptor:
-        logger.info("Adding KimiToolCallInterceptor to pipeline")
-        processors.append(llm._kimi_interceptor)
-
     processors.extend(
         [
             pipeline_engine_callback_processor,

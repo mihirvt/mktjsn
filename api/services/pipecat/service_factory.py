@@ -385,9 +385,6 @@ def create_llm_service(user_config):
             model=model,
             params=OpenAILLMService.InputParams(temperature=temperature),
         )
-        if getattr(user_config.llm, "enable_kimi_tool_parser", False):
-            from api.plugins.kimi_tool_parser import KimiToolCallInterceptor
-            service._kimi_interceptor = KimiToolCallInterceptor(llm=service)
         return service
     elif user_config.llm.provider == ServiceProviders.OPENROUTER.value:
         return OpenRouterLLMService(
@@ -435,9 +432,6 @@ def create_llm_service(user_config):
                 extra={"reasoning_effort": reasoning_effort},
             ),
         )
-        if getattr(user_config.llm, "enable_kimi_tool_parser", False):
-            from api.plugins.kimi_tool_parser import KimiToolCallInterceptor
-            service._kimi_interceptor = KimiToolCallInterceptor(llm=service)
         return service
     else:
         raise HTTPException(status_code=400, detail="Invalid LLM provider")
