@@ -52,6 +52,14 @@ class XMLFunctionTagFilter(BaseTextFilter):
             r"<function=[^/>]*\s*/\s*>",
             # Standard function tags: <function=...>...</function>
             r"<function=.*?</function>",
+            # Kimi K2 vLLM/DeepInfra format: <function_calls>...<invoke ...>...</invoke>...</function_calls>
+            r"<function_calls>.*?</function_calls>",
+            # Kimi K2 self-closing invoke: <invoke name="..."/>
+            r'<invoke\s+name="[^"]*"\s*/>',
+            # Kimi K2 invoke with body: <invoke name="...">...</invoke>
+            r'<invoke\s+name="[^"]*"\s*>.*?</invoke>',
+            # Moonshot native format: <|tool_calls_section_begin|>...<|tool_calls_section_end|>
+            r"<\|tool_calls_section_begin\|>.*?<\|tool_calls_section_end\|>",
         ]
 
         # Combine default patterns with custom ones

@@ -1,9 +1,9 @@
 """Kimi K2 Tool Call Interceptor for Pipecat.
 
 Kimi K2 on DeepInfra / Groq does NOT support standard OpenAI-compatible
-``delta.tool_calls`` streaming. Instead it emits tool calls as raw XML text
-inside ``delta.content``.  This interceptor sits between the LLM and TTS in
-the pipeline and:
+``delta.tool_calls`` streaming consistently. It sometimes emits tool calls
+as raw XML text inside ``delta.content``.  This interceptor sits between
+the LLM and TTS in the pipeline and:
 
   1. Passes normal text through with **zero latency** (no buffering).
   2. Detects ``<function_calls>`` (vLLM format) or ``<|tool_calls_section_begin|>``
@@ -11,11 +11,12 @@ the pipeline and:
   3. When a tool call tag is detected:
        a. Drops the "preamble" text (echo of user words the model generates
           before the tag).
-       b. Pushes an ``InterruptionFrame`` to cancel any preamble audio TTS
-          may already be processing AND to reset the ``LLMAssistantAggregator``
-          so the preamble does not pollute conversation context.
-       c. Buffers the remainder of the tool call XML until the closing tag.
-       d. Parses and executes the tool call via the LLM's ``run_function_calls``.
+       b. Buffers the tool call XML until the closing tag.
+       c. Parses and executes the tool call via the LLM's ``run_function_calls``.
+
+  **No InterruptionFrame is pushed** to avoid freezing the pipeline state.
+  Preamble tokens that were already flushed before the tag was detected
+  will reach TTS — this is the minimal acceptable audio leak (~50-200ms).
 """
 
 import json
@@ -26,7 +27,7 @@ from loguru import logger
 from pipecat.frames.frames import (
     TextFrame,
     Frame,
-    InterruptionFrame,
+    LLMFullResponseStartFrame,
     LLMFullResponseEndFrame,
     LLMContextFrame,
     FunctionCallsFromLLMInfoFrame,
@@ -137,9 +138,12 @@ class KimiToolCallInterceptor(FrameProcessor):
     Design:
       * Normal text passes through **immediately** — no buffering.
       * Only holds back a short ``<…`` partial when it might be a tag start.
-      * When a full tag is confirmed the preamble is dropped, an
-        ``InterruptionFrame`` cancels any TTS/context that already received
-        leaked preamble tokens, and the tool call is executed.
+      * When a full tag is confirmed the preamble is dropped and the tool
+        call XML is buffered + parsed + executed.
+      * **No InterruptionFrame** is ever pushed. This is critical — pushing
+        an InterruptionFrame from inside the pipeline between LLM and TTS
+        causes the pipeline to enter a fully-interrupted state and the bot
+        freezes (won't respond to user after the interruption).
     """
 
     def __init__(self, llm=None):
@@ -155,6 +159,13 @@ class KimiToolCallInterceptor(FrameProcessor):
         # Latest LLM context for constructing FunctionCallFromLLM
         self._latest_context = None
 
+    def _reset_state(self):
+        """Reset all interceptor state. Called at start of each LLM response."""
+        self._is_buffering_tool = False
+        self._tool_call_buffer = ""
+        self._lookahead_buffer = ""
+        self._flushed_preamble_tokens = False
+
     # ── Main dispatch ──────────────────────────────────────────────────────
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -167,6 +178,15 @@ class KimiToolCallInterceptor(FrameProcessor):
                     self._latest_context = frame.context
             except NameError:
                 pass
+
+        # Reset state at the start of each new LLM response turn
+        if (
+            direction == FrameDirection.DOWNSTREAM
+            and isinstance(frame, LLMFullResponseStartFrame)
+        ):
+            self._reset_state()
+            await self.push_frame(frame, direction)
+            return
 
         # Only intercept downstream TextFrames
         if direction == FrameDirection.DOWNSTREAM and isinstance(frame, TextFrame):
@@ -204,32 +224,35 @@ class KimiToolCallInterceptor(FrameProcessor):
         has_vllm = _VLLM_TAG_START in self._lookahead_buffer
         if has_moon or has_vllm:
             tag = _MOON_TAG_START if has_moon else _VLLM_TAG_START
+            end_tag = _MOON_TAG_END if has_moon else _VLLM_TAG_END
             start_idx = self._lookahead_buffer.find(tag)
 
             preamble = self._lookahead_buffer[:start_idx]
 
             if preamble or self._flushed_preamble_tokens:
-                total_preamble = preamble
                 logger.debug(
                     f"KimiToolCallInterceptor: Dropping pre-tool-call preamble "
-                    f"({len(total_preamble)} chars in buffer): {repr(total_preamble[:80])}"
+                    f"({len(preamble)} chars in buffer, "
+                    f"flushed_earlier={self._flushed_preamble_tokens}): "
+                    f"{repr(preamble[:80])}"
                 )
-                # Cancel any preamble tokens that already reached TTS / aggregator.
-                # InterruptionFrame tells:
-                #   - TTS to cancel audio for preamble text
-                #   - LLMAssistantAggregator to reset (clearing preamble from context)
-                if self._flushed_preamble_tokens:
-                    logger.debug(
-                        "KimiToolCallInterceptor: Pushing InterruptionFrame to "
-                        "cancel already-flushed preamble in TTS/aggregator"
-                    )
-                    await self.push_frame(InterruptionFrame(), direction)
 
             self._is_buffering_tool = True
             self._tool_call_buffer = self._lookahead_buffer[start_idx:]
             self._lookahead_buffer = ""
             self._flushed_preamble_tokens = False
-            logger.debug("KimiToolCallInterceptor: Triggered, buffering tool call stream.")
+            logger.debug(
+                f"KimiToolCallInterceptor: Triggered, buffering tool call stream. "
+                f"Buffer so far: {len(self._tool_call_buffer)} chars"
+            )
+
+            # Check if the ENTIRE tool call (including end tag) arrived in one frame
+            if end_tag in self._tool_call_buffer:
+                logger.debug(
+                    "KimiToolCallInterceptor: Complete tool call in single frame, "
+                    "finalizing immediately."
+                )
+                await self._finalize_tool_call(direction)
             return
 
         # Check for a partial tag start — hold back only the '<' or '<|' portion
@@ -258,7 +281,10 @@ class KimiToolCallInterceptor(FrameProcessor):
 
     async def _finalize_tool_call(self, direction: FrameDirection):
         """Parse the buffered tool-call XML and execute via the LLM service."""
-        logger.debug("KimiToolCallInterceptor: Buffer complete, parsing...")
+        logger.debug(
+            f"KimiToolCallInterceptor: Buffer complete ({len(self._tool_call_buffer)} chars), "
+            f"parsing..."
+        )
         tool_calls = extract_tool_call_info(self._tool_call_buffer)
 
         if tool_calls and self._llm and hasattr(self._llm, "run_function_calls"):
@@ -279,7 +305,7 @@ class KimiToolCallInterceptor(FrameProcessor):
                     )
                 logger.info(
                     f"KimiToolCallInterceptor: Submitting {len(calls_to_run)} "
-                    f"function calls to LLM service"
+                    f"function call(s): {[c.function_name for c in calls_to_run]}"
                 )
                 await self.push_frame(
                     FunctionCallsFromLLMInfoFrame(function_calls=calls_to_run),
