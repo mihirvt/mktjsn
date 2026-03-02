@@ -33,9 +33,9 @@ def extract_tool_call_info(tool_call_rsp: str):
         # Some providers may omit section end tokens. Parse tool_call blocks directly from
         # the full text instead of requiring wrapper tags to be complete.
         func_call_pattern = (
-            r"<\|tool_call_begin\|>\s*(?P<tool_call_id>[\w\.]+:\d+)\s*"
-            r"<\|tool_call_argument_begin\|>\s*(?P<function_arguments>.*?)\s*"
-            r"<\|tool_call_end\|>"
+            r"\<\|tool_call_begin\|\>\s*(?P<tool_call_id>[\w\.]+:\d+)\s*"
+            r"\<\|tool_call_argument_begin\|\>\s*(?P<function_arguments>.*?)\s*"
+            r"\<\|tool_call_end\|\>"
         )
         for match in re.findall(func_call_pattern, tool_call_rsp, re.DOTALL):
             function_id, function_args = match
@@ -124,11 +124,37 @@ def extract_tool_call_info(tool_call_rsp: str):
 
     return tool_calls
 
+
+# Characters that mark the end of a spoken sentence/clause.
+# We flush the lookahead buffer only at these boundaries so that the preamble
+# echoed by Kimi K2 before <function_calls> (which is never a complete sentence)
+# stays buffered long enough for the tag to be detected and dropped.
+_SENTENCE_END_CHARS = frozenset(['।', '.', '?', '!'])
+
+# Safety valve: if the lookahead buffer exceeds this many chars with no sentence
+# boundary, force-flush to avoid starving TTS on legitimately long unpunctuated text.
+_MAX_LOOKAHEAD_CHARS = 400
+
+
+def _last_sentence_boundary(text: str) -> int:
+    """Return the index just AFTER the last sentence-ending char, or 0 if none."""
+    for i in range(len(text) - 1, -1, -1):
+        if text[i] in _SENTENCE_END_CHARS:
+            return i + 1
+    return 0
+
+
 class KimiToolCallInterceptor(FrameProcessor):
     """
     Kimi K2 outputs raw string tags instead of OpenAI standard JSON tool calls.
     This processor captures TextFrames that start Kimi tags, buffers them,
     parses them upon completion, and emits standard pipecat LLM Tool Call frames.
+
+    Key design: text is NOT flushed to TTS on every token. Instead it accumulates
+    in a lookahead buffer and is released only at sentence boundaries (. ? ! ।).
+    This ensures that the preamble Kimi K2 emits before <function_calls> — which
+    always echoes the user's words and never ends with sentence punctuation — stays
+    buffered until the tag is detected, at which point it is silently dropped.
     """
     def __init__(self, llm=None):
         super().__init__()
@@ -151,6 +177,7 @@ class KimiToolCallInterceptor(FrameProcessor):
         if direction == FrameDirection.DOWNSTREAM and isinstance(frame, TextFrame):
             text = frame.text
 
+            # ── Phase 1: already inside a tool call block ──────────────────────
             if self._is_buffering_tool:
                 self._tool_call_buffer += text
                 
@@ -193,30 +220,29 @@ class KimiToolCallInterceptor(FrameProcessor):
                     self._is_buffering_tool = False
                     self._tool_call_buffer = ""
                 
-                # Consume this TextFrame so it doesn't leak into the TTS!
+                # Consume this TextFrame — never let tool call text reach TTS
                 return
 
-            # Not buffering tool yet, accumulate into lookahead buffer
+            # ── Phase 2: not yet in a tool call — accumulate lookahead buffer ──
+            #
+            # We do NOT flush on every token. Instead we accumulate and only flush
+            # at sentence-ending characters. This is the core fix: Kimi K2's
+            # pre-tool-call preamble never ends with punctuation, so it stays
+            # buffered until we detect <function_calls> and can drop it cleanly.
             self._lookahead_buffer += text
-            
-            # Check if lookahead complete matches a start tag
+
+            # Check if a complete tool call start tag is now in the buffer
             if "<|tool_calls_section_begin|>" in self._lookahead_buffer or "<function_calls>" in self._lookahead_buffer:
-                # Flush text before tag to normal processing
                 tag_idx1 = self._lookahead_buffer.find("<|tool_calls_section_begin|>")
                 tag_idx2 = self._lookahead_buffer.find("<function_calls>")
                 start_idx = tag_idx1 if tag_idx1 != -1 else tag_idx2
-                
-                safe_to_flush = self._lookahead_buffer[:start_idx]
-                if safe_to_flush:
-                    # Drop preamble text that precedes the tool call tag.
-                    # Kimi K2 / DeepInfra vLLM echoes the user's message back as
-                    # "thinking" text before emitting <function_calls>. Forwarding
-                    # this to TTS causes it to repeat the user's words aloud.
-                    # Silently discard it — it is model scratchpad, not speech.
+
+                preamble = self._lookahead_buffer[:start_idx]
+                if preamble:
                     logger.debug(
                         f"KimiToolCallInterceptor: Dropping pre-tool-call preamble "
-                        f"({len(safe_to_flush)} chars) to prevent TTS echo: "
-                        f"{repr(safe_to_flush[:80])}"
+                        f"({len(preamble)} chars) to prevent TTS echo: "
+                        f"{repr(preamble[:80])}"
                     )
 
                 self._is_buffering_tool = True
@@ -225,34 +251,50 @@ class KimiToolCallInterceptor(FrameProcessor):
                 logger.debug(f"KimiToolCallInterceptor: Triggered, buffering tool call stream.")
                 return
 
-            # If no complete match, check for partial tags
+            # Check for partial tag prefixes — hold them back but flush confirmed-
+            # safe text before them at sentence boundaries.
             last_lt = self._lookahead_buffer.rfind('<')
             if last_lt != -1:
                 possible_tag = self._lookahead_buffer[last_lt:]
-                # Check if this possible prefix matches our tags (up to length of partial string)
                 if len(possible_tag) < 30 and (
-                    "<|tool_calls_section_begin|>".startswith(possible_tag) or 
+                    "<|tool_calls_section_begin|>".startswith(possible_tag) or
                     "<function_calls>".startswith(possible_tag)
                 ):
-                    # Delay this part. Flush everything before it
-                    safe_to_flush = self._lookahead_buffer[:last_lt]
-                    if safe_to_flush:
-                        await self.push_frame(TextFrame(safe_to_flush), direction)
-                    self._lookahead_buffer = possible_tag
+                    # Text before last_lt is safe. Flush it only at a sentence boundary
+                    # so we don't hold normal speech too long.
+                    safe_region = self._lookahead_buffer[:last_lt]
+                    flush_idx = _last_sentence_boundary(safe_region)
+                    if flush_idx > 0:
+                        to_flush = safe_region[:flush_idx]
+                        remainder = safe_region[flush_idx:]
+                        if to_flush.strip():
+                            await self.push_frame(TextFrame(to_flush), direction)
+                        self._lookahead_buffer = remainder + possible_tag
+                    # else: keep holding — no sentence boundary before the partial tag yet
                     return
-            
-            # No partial tags detected, flush lookahead buffer immediately
-            if self._lookahead_buffer:
-                # Avoid sending blank/whitespace-only chunks to TTS providers.
+
+            # No tool call tags or partial starts. Flush at sentence boundaries.
+            flush_idx = _last_sentence_boundary(self._lookahead_buffer)
+            if flush_idx > 0:
+                to_flush = self._lookahead_buffer[:flush_idx]
+                self._lookahead_buffer = self._lookahead_buffer[flush_idx:]
+                if to_flush.strip():
+                    await self.push_frame(TextFrame(to_flush), direction)
+            elif len(self._lookahead_buffer) > _MAX_LOOKAHEAD_CHARS:
+                # Safety valve: force-flush if buffer is very large with no sentence boundary.
+                logger.debug(
+                    f"KimiToolCallInterceptor: Force-flushing oversized lookahead buffer "
+                    f"({len(self._lookahead_buffer)} chars)"
+                )
                 if self._lookahead_buffer.strip():
                     await self.push_frame(TextFrame(self._lookahead_buffer), direction)
                 self._lookahead_buffer = ""
-            
+
             return
-            
+
         else:
-            # Non-Text frames or upstream frames pass through
-            # Note: For LLMFullResponseEndFrame, flush remaining lookahead buffer!
+            # Non-Text frames (or upstream frames) pass through.
+            # For LLMFullResponseEndFrame: flush any remaining lookahead buffer.
             from pipecat.frames.frames import LLMFullResponseEndFrame
             if direction == FrameDirection.DOWNSTREAM and isinstance(frame, LLMFullResponseEndFrame):
                 # Groq/vLLM can occasionally truncate or omit section-end tags.
@@ -283,9 +325,10 @@ class KimiToolCallInterceptor(FrameProcessor):
                     self._is_buffering_tool = False
                     self._tool_call_buffer = ""
 
+                # Flush any remaining lookahead text (tail of a normal response)
                 if self._lookahead_buffer:
                     if self._lookahead_buffer.strip():
                         await self.push_frame(TextFrame(self._lookahead_buffer), direction)
                     self._lookahead_buffer = ""
-            
+
             await self.push_frame(frame, direction)
