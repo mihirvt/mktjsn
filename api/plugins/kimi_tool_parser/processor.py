@@ -13,10 +13,13 @@ the LLM and TTS in the pipeline and:
           before the tag).
        b. Buffers the tool call XML until the closing tag.
        c. Parses and executes the tool call via the LLM's ``run_function_calls``.
+  4. After a tool call is finalized, **suppresses ALL remaining text** from
+     the current LLM response. This is critical because Kimi K2 often emits
+     trailing garbage text AFTER the closing ``</function_calls>`` tag. If
+     this text reaches TTS it gets spoken AND saved into the conversation
+     context, corrupting all subsequent turns.
 
   **No InterruptionFrame is pushed** to avoid freezing the pipeline state.
-  Preamble tokens that were already flushed before the tag was detected
-  will reach TTS — this is the minimal acceptable audio leak (~50-200ms).
 """
 
 import json
@@ -153,10 +156,10 @@ class KimiToolCallInterceptor(FrameProcessor):
       * Only holds back a short ``<…`` partial when it might be a tag start.
       * When a full tag is confirmed the preamble is dropped and the tool
         call XML is buffered + parsed + executed.
-      * **No InterruptionFrame** is ever pushed. This is critical — pushing
-        an InterruptionFrame from inside the pipeline between LLM and TTS
-        causes the pipeline to enter a fully-interrupted state and the bot
-        freezes (won't respond to user after the interruption).
+      * After a tool call is executed, ALL remaining text from the current
+        LLM response is **suppressed**. This prevents trailing garbage
+        from reaching TTS and from being saved into the conversation context.
+      * **No InterruptionFrame** is ever pushed.
     """
 
     def __init__(self, llm=None):
@@ -175,6 +178,12 @@ class KimiToolCallInterceptor(FrameProcessor):
         # CRITICAL: Kimi K2 requires sequential IDs starting at 0.
         # Using random IDs causes the model to crash on subsequent turns.
         self._tool_call_counter = 0
+        # CRITICAL: After a tool call is finalized, suppress ALL remaining
+        # text from the current LLM response. Kimi K2 often emits trailing
+        # garbage (echoed user words) AFTER </function_calls>. If this text
+        # reaches TTS it gets spoken AND saved into conversation history,
+        # corrupting all subsequent turns.
+        self._suppress_until_response_end = False
 
     def _reset_state(self):
         """Reset all interceptor state. Called at start of each LLM response."""
@@ -182,6 +191,7 @@ class KimiToolCallInterceptor(FrameProcessor):
         self._tool_call_buffer = ""
         self._lookahead_buffer = ""
         self._flushed_preamble_tokens = False
+        self._suppress_until_response_end = False
 
     # ── Main dispatch ──────────────────────────────────────────────────────
 
@@ -225,6 +235,16 @@ class KimiToolCallInterceptor(FrameProcessor):
 
     async def _handle_text(self, frame: TextFrame, direction: FrameDirection):
         text = frame.text
+
+        # ── GATE: After a tool call was finalized, drop ALL remaining text
+        # from this LLM response. This prevents trailing garbage from
+        # reaching TTS and from being saved into conversation context.
+        if self._suppress_until_response_end:
+            logger.debug(
+                f"KimiToolCallInterceptor: Suppressing post-tool-call text "
+                f"({len(text)} chars): {repr(text[:60])}"
+            )
+            return
 
         # Phase 1: already inside a tool-call XML block — keep buffering
         if self._is_buffering_tool:
@@ -306,6 +326,18 @@ class KimiToolCallInterceptor(FrameProcessor):
             self._tool_call_buffer, start_idx=self._tool_call_counter
         )
 
+        # CRITICAL: Activate the suppression gate BEFORE executing the tool call.
+        # Any text tokens that arrive after this point (trailing garbage from
+        # the LLM's current response) will be silently dropped.
+        self._suppress_until_response_end = True
+        self._is_buffering_tool = False
+        self._tool_call_buffer = ""
+        self._flushed_preamble_tokens = False
+        logger.info(
+            "KimiToolCallInterceptor: Suppression gate ACTIVATED — "
+            "all remaining text from this response will be dropped"
+        )
+
         if tool_calls and self._llm and hasattr(self._llm, "run_function_calls"):
             try:
                 calls_to_run = []
@@ -345,10 +377,6 @@ class KimiToolCallInterceptor(FrameProcessor):
                 f"{self._tool_call_buffer[:200]}"
             )
 
-        self._is_buffering_tool = False
-        self._tool_call_buffer = ""
-        self._flushed_preamble_tokens = False
-
     # ── Response-end handling ──────────────────────────────────────────────
 
     async def _handle_response_end(self, frame: Frame, direction: FrameDirection):
@@ -359,11 +387,18 @@ class KimiToolCallInterceptor(FrameProcessor):
             )
             await self._finalize_tool_call(direction)
 
-        # Flush any remaining lookahead text (e.g. trailing text with no tag)
-        if self._lookahead_buffer:
+        # If suppression was active, log how much was suppressed
+        if self._suppress_until_response_end:
+            logger.info(
+                "KimiToolCallInterceptor: Response ended. Suppression gate deactivated."
+            )
+
+        # Only flush remaining lookahead if NOT suppressing
+        if not self._suppress_until_response_end and self._lookahead_buffer:
             if self._lookahead_buffer.strip():
                 await self.push_frame(TextFrame(self._lookahead_buffer), direction)
             self._lookahead_buffer = ""
 
         self._flushed_preamble_tokens = False
+        self._suppress_until_response_end = False
         await self.push_frame(frame, direction)
