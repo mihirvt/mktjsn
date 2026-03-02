@@ -322,7 +322,7 @@ async def reactivate_api_key(
 
 
 # Voice Configuration Endpoints
-TTSProvider = Literal["elevenlabs", "deepgram", "sarvam", "cartesia", "dograh", "smallest_ai"]
+TTSProvider = Literal["elevenlabs", "deepgram", "sarvam", "cartesia", "dograh", "smallest_ai", "voicemaker"]
 
 
 class VoiceInfo(BaseModel):
@@ -382,6 +382,58 @@ async def get_voices(
                 else:
                     logger.error(f"Failed to fetch Smallest.ai voices: {res.status_code} {res.text}")
                     return VoicesResponse(provider="smallest_ai", voices=[])
+
+        if provider == "voicemaker":
+            user_config = await db_client.get_user_configurations(user.id)
+            api_key = None
+            if user_config.tts:
+                provider_val = (
+                    user_config.tts.provider.value
+                    if hasattr(user_config.tts.provider, "value")
+                    else user_config.tts.provider
+                )
+                if provider_val == "voicemaker":
+                    api_key = getattr(user_config.tts, "api_key", None)
+
+            if not api_key:
+                return VoicesResponse(provider="voicemaker", voices=[])
+
+            import httpx
+
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.post(
+                    "https://developer.voicemaker.in/api/v1/voice/list",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={},  # no filter = all voices
+                )
+
+            if res.status_code == 200:
+                data = res.json()
+                voice_list = data.get("data", {}).get("voices_list", [])
+                logger.debug(
+                    f"Voicemaker: fetched {len(voice_list)} voices"
+                )
+                voices = []
+                for v in voice_list:
+                    voices.append(
+                        VoiceInfo(
+                            voice_id=v.get("VoiceId", ""),
+                            name=v.get("VoiceWebname", v.get("VoiceId", "")),
+                            gender=v.get("VoiceGender"),
+                            language=v.get("Language"),
+                            accent=v.get("Country"),
+                            description=v.get("Engine"),
+                        )
+                    )
+                return VoicesResponse(provider="voicemaker", voices=voices)
+            else:
+                logger.error(
+                    f"Voicemaker voice list API error: {res.status_code} {res.text[:300]}"
+                )
+                return VoicesResponse(provider="voicemaker", voices=[])
 
         result = await mps_service_key_client.get_voices(
             provider=provider,

@@ -27,6 +27,7 @@ class ServiceProviders(str, Enum):
     SMALLEST_AI = "smallest_ai"
     DEEPINFRA = "deepinfra"
     SONIOX = "soniox"
+    VOICEMAKER = "voicemaker"
 
 
 class BaseServiceConfiguration(BaseModel):
@@ -523,6 +524,94 @@ class SmallestAITTSConfiguration(BaseTTSConfiguration):
     api_key: str
 
 
+VOICEMAKER_TTS_VOICES = [
+    "ai3-Jony",
+    "ai3-Aria",
+    "ai3-Jenny",
+    "ai3-Sonia",
+    "ai3-Guy",
+]
+
+VOICEMAKER_TTS_LANGUAGES = [
+    "en-US", "en-GB", "en-AU", "en-CA", "en-IN",
+    "hi-IN", "multi-lang",
+    "fr-FR", "fr-CA",
+    "de-DE", "es-ES", "es-US",
+    "pt-BR", "pt-PT",
+    "it-IT", "ja-JP", "ko-KR",
+    "zh-CN", "zh-TW",
+    "ar-SA", "nl-NL", "pl-PL",
+    "ru-RU", "sv-SE", "tr-TR",
+]
+
+VOICEMAKER_OUTPUT_FORMATS = ["mp3", "wav", "ogg", "opus", "aac", "ulaw", "alaw"]
+VOICEMAKER_TELEPHONY_SAMPLE_RATES = [8000, 16000, 22050, 24000]
+VOICEMAKER_WEB_SAMPLE_RATES = [22050, 24000, 44100, 48000]
+VOICEMAKER_PRO_ENGINES = ["highres", "turbo", "expressive"]
+
+
+@register_tts
+class VoicemakerTTSConfiguration(BaseTTSConfiguration):
+    provider: Literal[ServiceProviders.VOICEMAKER] = ServiceProviders.VOICEMAKER
+    model: str = Field(
+        default="neural",
+        json_schema_extra={"examples": ["neural", "standard"]},
+        description="Voicemaker engine type (neural or standard)",
+    )
+    voice: str = Field(
+        default="ai3-Jony",
+        json_schema_extra={"examples": VOICEMAKER_TTS_VOICES},
+        description="Voicemaker VoiceId (e.g. ai3-Jony)",
+    )
+    language: str = Field(
+        default="en-US",
+        json_schema_extra={"examples": VOICEMAKER_TTS_LANGUAGES},
+        description="Language code (e.g. en-US, hi-IN, multi-lang)",
+    )
+    telephony_sample_rate: int = Field(
+        default=8000,
+        json_schema_extra={"examples": VOICEMAKER_TELEPHONY_SAMPLE_RATES},
+        description="Sample rate for telephony calls (8000, 16000, 22050, 24000 Hz)",
+    )
+    web_sample_rate: int = Field(
+        default=48000,
+        json_schema_extra={"examples": VOICEMAKER_WEB_SAMPLE_RATES},
+        description="Sample rate for web/WebRTC calls (22050, 24000, 44100, 48000 Hz)",
+    )
+    # Optional quality tuning
+    master_speed: str = Field(
+        default="0",
+        description="Speed adjustment: -100 to 100 (0 = normal)",
+    )
+    master_pitch: str = Field(
+        default="0",
+        description="Pitch adjustment: -100 to 100 (0 = normal)",
+    )
+    master_volume: str = Field(
+        default="0",
+        description="Volume adjustment: -20 to 20 (0 = normal)",
+    )
+    # ProPlus-only (optional)
+    stability: Union[str, None] = Field(
+        default=None,
+        description="Stability 0–100 (ProPlus voices only)",
+    )
+    similarity: Union[str, None] = Field(
+        default=None,
+        description="Similarity 0–100 (ProPlus voices only)",
+    )
+    pro_engine: Union[str, None] = Field(
+        default=None,
+        json_schema_extra={"examples": VOICEMAKER_PRO_ENGINES},
+        description="Pro engine: turbo, highres, or expressive (ProPlus voices only)",
+    )
+    accent_code: Union[str, None] = Field(
+        default=None,
+        description="Accent code for multilingual voices (e.g. en-US, fr-FR)",
+    )
+    api_key: str
+
+
 TTSConfig = Annotated[
     Union[
         DeepgramTTSConfiguration,
@@ -532,6 +621,7 @@ TTSConfig = Annotated[
         DograhTTSService,
         SarvamTTSConfiguration,
         SmallestAITTSConfiguration,
+        VoicemakerTTSConfiguration,
     ],
     Field(discriminator="provider"),
 ]

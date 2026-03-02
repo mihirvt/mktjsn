@@ -24,6 +24,7 @@ from pipecat.services.sarvam.tts import SarvamTTSService
 from api.plugins.sarvam import SarvamLLMService
 from api.plugins.deepinfra import DeepInfraLLMService
 from api.plugins.smallest_ai import SmallestAITTSService
+from api.plugins.voicemaker import VoicemakerTTSService
 from api.plugins.cartesia.tts import create_cartesia_tts
 from api.plugins.cartesia.stt import create_cartesia_stt
 from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
@@ -308,6 +309,41 @@ def create_tts_service(user_config, audio_config: "AudioConfig"):
                 consistency=float(getattr(user_config.tts, "consistency", 0.5)),
                 enhancement=int(getattr(user_config.tts, "enhancement", 1)),
                 similarity=float(getattr(user_config.tts, "similarity", 0)),
+            ),
+        )
+    elif user_config.tts.provider == ServiceProviders.VOICEMAKER.value:
+        voice = getattr(user_config.tts, "voice", None) or "ai3-Jony"
+        is_telephony = audio_config.transport_out_sample_rate <= 8000
+        if is_telephony:
+            sample_rate = int(getattr(user_config.tts, "telephony_sample_rate", 8000) or 8000)
+        else:
+            sample_rate = int(getattr(user_config.tts, "web_sample_rate", 48000) or 48000)
+        language_code = getattr(user_config.tts, "language", "en-US") or "en-US"
+        master_speed = str(getattr(user_config.tts, "master_speed", "0") or "0")
+        master_pitch = str(getattr(user_config.tts, "master_pitch", "0") or "0")
+        master_volume = str(getattr(user_config.tts, "master_volume", "0") or "0")
+        stability = getattr(user_config.tts, "stability", None)
+        similarity = getattr(user_config.tts, "similarity", None)
+        pro_engine = getattr(user_config.tts, "pro_engine", None)
+        accent_code = getattr(user_config.tts, "accent_code", None)
+        logger.debug(
+            f"Voicemaker TTS: voice={voice}, language={language_code}, "
+            f"sample_rate={sample_rate}, pro_engine={pro_engine}"
+        )
+        return VoicemakerTTSService(
+            api_key=user_config.tts.api_key,
+            voice_id=voice,
+            sample_rate=sample_rate,
+            params=VoicemakerTTSService.InputParams(
+                language_code=language_code,
+                output_format="mp3",  # We decode to PCM – always request mp3
+                master_speed=master_speed,
+                master_pitch=master_pitch,
+                master_volume=master_volume,
+                stability=str(stability) if stability is not None else None,
+                similarity=str(similarity) if similarity is not None else None,
+                pro_engine=pro_engine if pro_engine else None,
+                accent_code=accent_code if accent_code else None,
             ),
         )
     else:

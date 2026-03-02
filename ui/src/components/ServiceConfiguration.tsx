@@ -191,6 +191,10 @@ const LANGUAGE_DISPLAY_NAMES: Record<string, string> = {
     "jw": "Javanese",
     "su": "Sundanese",
     "yue": "Cantonese",
+    // Voicemaker-specific
+    "multi-lang": "Multilingual (Pro)",
+    "en-CA": "English (Canada)",
+    "es-US": "Spanish (US)",
 };
 
 // Display names for Sarvam voices
