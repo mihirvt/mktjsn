@@ -65,13 +65,20 @@ def build_pipeline(
         logger.info("Adding native voicemail detector to pipeline")
         processors.append(voicemail_detector.detector())
 
-    # Continue with the rest of the pipeline
     processors.extend(
         [
             user_context_aggregator,
             llm,  # LLM
         ]
     )
+
+    try:
+        from api.plugins.kimi_tool_parser import KimiToolCallInterceptor
+        if hasattr(llm, "model_name") and "kimi" in llm.model_name.lower():
+            processors.append(KimiToolCallInterceptor(llm=llm))
+            logger.info("Added KimiToolCallInterceptor to pipeline")
+    except Exception as e:
+        logger.warning(f"Failed to add KimiToolCallInterceptor: {e}")
 
     processors.extend(
         [
