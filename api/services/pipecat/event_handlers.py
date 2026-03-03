@@ -1,3 +1,5 @@
+import asyncio
+
 from loguru import logger
 
 from api.db import db_client
@@ -56,6 +58,7 @@ def register_event_handlers(
         "client_connected": False,
         "llm_triggered": False,
     }
+    fallback_llm_trigger_task = None
 
     async def maybe_trigger_llm():
         """Trigger LLM only after both pipeline_started and client_connected events."""
@@ -72,9 +75,12 @@ def register_event_handlers(
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(_transport, _participant):
+        nonlocal fallback_llm_trigger_task
         logger.debug("In on_client_connected callback handler")
         await audio_buffer.start_recording()
         ready_state["client_connected"] = True
+        if fallback_llm_trigger_task and not fallback_llm_trigger_task.done():
+            fallback_llm_trigger_task.cancel()
         await maybe_trigger_llm()
 
     @transport.event_handler("on_client_disconnected")
@@ -94,16 +100,33 @@ def register_event_handlers(
 
     @task.event_handler("on_pipeline_started")
     async def on_pipeline_started(_task: PipelineTask, _frame: Frame):
+        nonlocal fallback_llm_trigger_task
         logger.debug("In on_pipeline_started callback handler")
         ready_state["pipeline_started"] = True
         await maybe_trigger_llm()
+
+        # Some telephony transports may not emit on_client_connected reliably.
+        # Fallback: trigger initial LLM turn shortly after pipeline start.
+        async def _fallback_initial_llm_trigger():
+            await asyncio.sleep(1.5)
+            if not ready_state["llm_triggered"]:
+                ready_state["llm_triggered"] = True
+                logger.warning(
+                    "on_client_connected not observed; triggering initial LLM generation via fallback"
+                )
+                await engine.llm.queue_frame(LLMContextFrame(engine.context))
+
+        fallback_llm_trigger_task = asyncio.create_task(_fallback_initial_llm_trigger())
 
     @task.event_handler("on_pipeline_finished")
     async def on_pipeline_finished(
         task: PipelineTask,
         _frame: Frame,
     ):
+        nonlocal fallback_llm_trigger_task
         logger.debug(f"In on_pipeline_finished callback handler")
+        if fallback_llm_trigger_task and not fallback_llm_trigger_task.done():
+            fallback_llm_trigger_task.cancel()
 
         workflow_run = await db_client.get_workflow_run_by_id(workflow_run_id)
 
@@ -120,7 +143,8 @@ def register_event_handlers(
                 logger.debug(f"Added trace URL to gathered_context: {trace_url}")
 
         # also consider existing gathered context in workflow_run
-        gathered_context = {**gathered_context, **workflow_run.gathered_context}
+        # Merge persisted context first, then fresh run context so latest values win.
+        gathered_context = {**workflow_run.gathered_context, **gathered_context}
 
         # Set user_speech call tag
         if in_memory_transcript_buffer:

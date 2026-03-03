@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     LLMService = Union[OpenAILLMService, AnthropicLLMService, GoogleLLMService]
 
 import asyncio
+from datetime import UTC, datetime
 
 from loguru import logger
 
@@ -50,6 +51,7 @@ from api.services.workflow.tools.timezone import (
     get_time_tools,
 )
 from pipecat.utils.tracing.context_registry import get_current_turn_context
+from pipecat.utils.run_context import turn_var
 
 
 class PipecatEngine:
@@ -462,6 +464,33 @@ class PipecatEngine:
 
         # Set current node for all nodes (including static ones) so STT mute filter works
         self._current_node = node
+
+        # Persist a deterministic node timeline for debugging and trace correlation.
+        turn_number = turn_var.get()
+        node_event = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "node": node.name,
+            "previous_node": previous_node_name,
+            "turn": turn_number,
+        }
+        node_timeline = self._gathered_context.get("node_timeline", [])
+        node_timeline.append(node_event)
+        self._gathered_context["node_timeline"] = node_timeline
+        self._gathered_context["current_node"] = node.name
+
+        # Enrich the current tracing span (if enabled) with node transition metadata.
+        try:
+            from opentelemetry import trace
+
+            span = trace.get_current_span()
+            if span and span.is_recording():
+                span.set_attribute("workflow.node.current", node.name)
+                if previous_node_name:
+                    span.set_attribute("workflow.node.previous", previous_node_name)
+                span.set_attribute("workflow.turn.number", int(turn_number or 0))
+        except Exception:
+            # Tracing is optional; never block pipeline execution for trace metadata.
+            pass
 
         # Send node transition event if callback is provided
         if self._node_transition_callback:
