@@ -108,12 +108,12 @@ class GroqLLMService(OpenAILLMService):
                 async for chunk in stream:
                     if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
                         content = chunk.choices[0].delta.content
-                        if "<function_call>" in content or in_xml:
+                        if "<function_call" in content or in_xml:
                             in_xml = True
                             xml_buffer += content
                             
                             # If we see the end of the tool call
-                            if "</function_call>" in xml_buffer:
+                            if "</function_call" in xml_buffer:
                                 match = re.search(r'<invoke name="([^"]+)">', xml_buffer)
                                 if match and ChoiceDeltaToolCall is not None:
                                     func_name = match.group(1)
