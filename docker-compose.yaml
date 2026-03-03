@@ -95,10 +95,10 @@ services:
       FASTAPI_WORKERS: 1
 
       # Langfuse
-      ENABLE_TRACING: "false"
-      # LANGFUSE_SECRET_KEY: ""
-      # LANGFUSE_PUBLIC_KEY: ""
-      # LANGFUSE_HOST: "https://langfuse.dograh.com"
+      ENABLE_TRACING: "true"
+      LANGFUSE_SECRET_KEY: "sk-lf-ca644246-5b42-47b3-8d98-4f306b06dd86"
+      LANGFUSE_PUBLIC_KEY: "pk-lf-6e529858-fa74-4460-ab82-6620f8ae6322"
+      LANGFUSE_HOST: "https://us.cloud.langfuse.com"
 
       # Sentry
       ENABLE_TELEMETRY: "${ENABLE_TELEMETRY:-true}"
