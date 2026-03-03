@@ -72,13 +72,7 @@ def build_pipeline(
         ]
     )
 
-    try:
-        from api.plugins.kimi_tool_parser import KimiToolCallInterceptor
-        if hasattr(llm, "model_name") and "kimi" in llm.model_name.lower():
-            processors.append(KimiToolCallInterceptor(llm=llm))
-            logger.info("Added KimiToolCallInterceptor to pipeline")
-    except Exception as e:
-        logger.warning(f"Failed to add KimiToolCallInterceptor: {e}")
+
 
     processors.extend(
         [
