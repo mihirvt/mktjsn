@@ -466,6 +466,7 @@ async def _run_pipeline(
     smart_turn_stop_secs = 2.0  # Default 2 seconds for incomplete turn timeout
     turn_stop_strategy = "transcription"  # Default to transcription-based detection
     keyterms = None  # Dictionary words for STT boosting
+    vad_config = None  # VAD override settings
 
     if workflow.workflow_configurations:
         # Use workflow-specific max call duration if provided
@@ -498,6 +499,9 @@ async def _run_pipeline(
                 keyterms = [
                     term.strip() for term in dictionary.split(",") if term.strip()
                 ]
+
+        if "vad_configuration" in workflow.workflow_configurations:
+            vad_config = workflow.workflow_configurations["vad_configuration"]
 
     # Create services based on user configuration
     stt = create_stt_service(user_config, audio_config, keyterms=keyterms)
@@ -607,19 +611,33 @@ async def _run_pipeline(
             stop=[SpeechTimeoutUserTurnStopStrategy()],
         )
 
-    # Create user mute strategies
-    # - CallbackUserMuteStrategy: mutes based on engine's _mute_pipeline state
     user_mute_strategies = [
         MuteUntilFirstBotCompleteUserMuteStrategy(),
         FunctionCallUserMuteStrategy(),
         CallbackUserMuteStrategy(should_mute_callback=engine.should_mute_user),
     ]
 
+    vad_params = VADParams(stop_secs=0.2)
+    # Default tuning for telephony (8000Hz) vs WebRTC (16000Hz+)
+    if audio_config and audio_config.transport_in_sample_rate <= 8000:
+        vad_params.min_volume = 0.2
+
+    # Override with custom VAD configuration if provided
+    if vad_config:
+        if "confidence" in vad_config and vad_config["confidence"] is not None:
+            vad_params.confidence = float(vad_config["confidence"])
+        if "start_secs" in vad_config and vad_config["start_secs"] is not None:
+            vad_params.start_secs = float(vad_config["start_secs"])
+        if "stop_secs" in vad_config and vad_config["stop_secs"] is not None:
+            vad_params.stop_secs = float(vad_config["stop_secs"])
+        if "min_volume" in vad_config and vad_config["min_volume"] is not None:
+            vad_params.min_volume = float(vad_config["min_volume"])
+
     user_params = LLMUserAggregatorParams(
         user_turn_strategies=user_turn_strategies,
         user_mute_strategies=user_mute_strategies,
         user_idle_timeout=max_user_idle_timeout,
-        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        vad_analyzer=SileroVADAnalyzer(params=vad_params),
     )
     context_aggregator = LLMContextAggregatorPair(
         context, assistant_params=assistant_params, user_params=user_params
