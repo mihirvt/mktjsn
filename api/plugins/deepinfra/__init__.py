@@ -112,61 +112,83 @@ class DeepInfraLLMService(OpenAILLMService):
         # Intercept and wrap the stream to intercept leaked XML tool calls for Kimi models
         if getattr(self, "model_name", "").lower().startswith("moonshotai/kimi"):
             async def _xml_to_tool_call_stream(stream):
-                in_xml = False
                 xml_buffer = ""
                 
                 import json
                 import re
+                import copy
                 try:
                     from openai.types.chat.chat_completion_chunk import ChoiceDeltaToolCall, ChoiceDeltaToolCallFunction
-                    from pydantic import BaseModel
                 except ImportError:
                     ChoiceDeltaToolCall = None
 
                 async for chunk in stream:
                     if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
                         content = chunk.choices[0].delta.content
-                        if "<function_call" in content or in_xml:
-                            in_xml = True
-                            xml_buffer += content
-                            
-                            # If we see the end of the tool call
-                            if "</function_call" in xml_buffer:
-                                match = re.search(r'<invoke\s+name="([^"]+)"', xml_buffer)
-                                if match and ChoiceDeltaToolCall is not None:
-                                    func_name = match.group(1)
-                                    
-                                    # Simple parameter extraction (basic key-value parsing)
-                                    args_dict = {}
-                                    param_matches = re.finditer(r'<parameter\s+name="([^"]+)">([^<]*)</parameter>', xml_buffer)
-                                    for pmatch in param_matches:
-                                        args_dict[pmatch.group(1)] = pmatch.group(2)
-                                        
-                                    args_str = json.dumps(args_dict)
-                                    
-                                    # Modify the chunk's delta to remove content and add tool_call
-                                    # Since we don't have deepinfra's actual call ID, we'll make a fake one
-                                    import uuid
-                                    
-                                    delta = chunk.choices[0].delta
-                                    delta.content = None
-                                    
-                                    # Construct a proper Pydantic ToolCall representation
-                                    tc_func = ChoiceDeltaToolCallFunction(name=func_name, arguments=args_str)
-                                    tc = ChoiceDeltaToolCall(index=0, id=f"call_{uuid.uuid4().hex[:8]}", type="function", function=tc_func)
-                                    
-                                    if hasattr(delta, "tool_calls"):
-                                        delta.tool_calls = [tc]
-                                    else:
-                                        setattr(delta, "tool_calls", [tc])
-                                        
-                                    yield chunk
+                        xml_buffer += content
+                        
+                        while True:
+                            start_idx = xml_buffer.find("<function_calls>")
+                            if start_idx == -1:
+                                start_idx = xml_buffer.find("<function_call>")
                                 
-                                in_xml = False
+                            if start_idx != -1:
+                                end_idx1 = xml_buffer.find("</function_calls>", start_idx)
+                                end_idx2 = xml_buffer.find("</function_call>", start_idx)
+                                end_idx = max(end_idx1, end_idx2)
+                                
+                                if end_idx != -1:
+                                    close_idx = xml_buffer.find(">", end_idx)
+                                    if close_idx != -1:
+                                        full_xml = xml_buffer[start_idx:close_idx+1]
+                                        
+                                        match = re.search(r'<invoke\s+name=["\']([^"\']+)["\']', full_xml)
+                                        if match and ChoiceDeltaToolCall is not None:
+                                            func_name = match.group(1)
+                                            args_dict = {}
+                                            param_matches = re.finditer(r'<parameter\s+name=["\']([^"\']+)["\']>([^<]*)</parameter>', full_xml)
+                                            for pmatch in param_matches:
+                                                args_dict[pmatch.group(1)] = pmatch.group(2)
+                                                
+                                            import uuid
+                                            tc_func = ChoiceDeltaToolCallFunction(name=func_name, arguments=json.dumps(args_dict))
+                                            tc = ChoiceDeltaToolCall(index=0, id=f"call_{uuid.uuid4().hex[:8]}", type="function", function=tc_func)
+                                            
+                                            tc_chunk = copy.deepcopy(chunk)
+                                            tc_chunk.choices[0].delta.content = None
+                                            if hasattr(tc_chunk.choices[0].delta, "tool_calls"):
+                                                tc_chunk.choices[0].delta.tool_calls = [tc]
+                                            else:
+                                                setattr(tc_chunk.choices[0].delta, "tool_calls", [tc])
+                                            yield tc_chunk
+                                            
+                                        xml_buffer = xml_buffer[:start_idx] + xml_buffer[close_idx+1:]
+                                        continue
+                            break
+                            
+                        safe_text = ""
+                        if "<function_" in xml_buffer:
+                            idx = xml_buffer.find("<function_")
+                            safe_text = xml_buffer[:idx]
+                            xml_buffer = xml_buffer[idx:]
+                        else:
+                            last_open = xml_buffer.rfind("<")
+                            if last_open != -1 and ("<function_calls>"[:len(xml_buffer)-last_open] == xml_buffer[last_open:] or "<function_call>"[:len(xml_buffer)-last_open] == xml_buffer[last_open:]):
+                                safe_text = xml_buffer[:last_open]
+                                xml_buffer = xml_buffer[last_open:]
+                            else:
+                                safe_text = xml_buffer
                                 xml_buffer = ""
-                            continue # skip yielding text chunks while buffering XML
-                    
-                    yield chunk
+                                
+                        if safe_text:
+                            text_chunk = copy.deepcopy(chunk)
+                            text_chunk.choices[0].delta.content = safe_text
+                            if hasattr(text_chunk.choices[0].delta, "tool_calls"):
+                                text_chunk.choices[0].delta.tool_calls = None
+                            yield text_chunk
+                            
+                    else:
+                        yield chunk
             return _xml_to_tool_call_stream(chunks)
         
         return chunks

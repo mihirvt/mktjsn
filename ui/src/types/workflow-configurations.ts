@@ -1,8 +1,8 @@
 export interface VADConfiguration {
     confidence: number;
-    start_seconds: number;
-    stop_seconds: number;
-    minimum_volume: number;
+    start_secs: number;
+    stop_secs: number;
+    min_volume: number;
 }
 
 export interface AmbientNoiseConfiguration {

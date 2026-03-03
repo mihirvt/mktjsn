@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { AmbientNoiseConfiguration, TurnStopStrategy, WorkflowConfigurations } from "@/types/workflow-configurations";
+import { AmbientNoiseConfiguration, TurnStopStrategy, VADConfiguration, WorkflowConfigurations } from "@/types/workflow-configurations";
 
 interface ConfigurationsDialogProps {
     open: boolean;
@@ -21,6 +21,13 @@ const DEFAULT_AMBIENT_NOISE_CONFIG: AmbientNoiseConfiguration = {
     volume: 0.3,
 };
 
+const DEFAULT_VAD_CONFIG: VADConfiguration = {
+    confidence: 0.7,
+    start_secs: 0.2,
+    stop_secs: 0.2,
+    min_volume: 0.2,
+};
+
 export const ConfigurationsDialog = ({
     open,
     onOpenChange,
@@ -31,6 +38,9 @@ export const ConfigurationsDialog = ({
     const [name, setName] = useState<string>(workflowName);
     const [ambientNoiseConfig, setAmbientNoiseConfig] = useState<AmbientNoiseConfiguration>(
         workflowConfigurations?.ambient_noise_configuration || DEFAULT_AMBIENT_NOISE_CONFIG
+    );
+    const [vadConfig, setVadConfig] = useState<VADConfiguration>(
+        workflowConfigurations?.vad_configuration || DEFAULT_VAD_CONFIG
     );
     const [maxCallDuration, setMaxCallDuration] = useState<number>(
         workflowConfigurations?.max_call_duration || 600  // Default 10 minutes
@@ -51,6 +61,7 @@ export const ConfigurationsDialog = ({
         try {
             await onSave({
                 ambient_noise_configuration: ambientNoiseConfig,
+                vad_configuration: vadConfig,
                 max_call_duration: maxCallDuration,
                 max_user_idle_timeout: maxUserIdleTimeout,
                 smart_turn_stop_secs: smartTurnStopSecs,
@@ -69,6 +80,7 @@ export const ConfigurationsDialog = ({
         if (open) {
             setName(workflowName);
             setAmbientNoiseConfig(workflowConfigurations?.ambient_noise_configuration || DEFAULT_AMBIENT_NOISE_CONFIG);
+            setVadConfig(workflowConfigurations?.vad_configuration || DEFAULT_VAD_CONFIG);
             setMaxCallDuration(workflowConfigurations?.max_call_duration || 600);
             setMaxUserIdleTimeout(workflowConfigurations?.max_user_idle_timeout || 10);
             setSmartTurnStopSecs(workflowConfigurations?.smart_turn_stop_secs || 2);
@@ -156,15 +168,88 @@ export const ConfigurationsDialog = ({
                     {/* Turn Detection Section */}
                     <div className="space-y-4">
                         <div>
-                            <h3 className="text-sm font-semibold mb-1">Turn Detection</h3>
+                            <h3 className="text-sm font-semibold mb-1">Turn Detection (VAD)</h3>
                             <p className="text-xs text-muted-foreground">
-                                Configure how the agent detects when the user has finished speaking.
+                                Configure how the agent detects when the user has finished speaking and voice activity parameters.
                             </p>
                         </div>
 
-                        <div className="space-y-2">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="vad_min_volume" className="text-xs">
+                                    VAD Minimum Volume (0-1)
+                                </Label>
+                                <Input
+                                    id="vad_min_volume"
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    max="1"
+                                    value={vadConfig.min_volume}
+                                    onChange={(e) => {
+                                        const value = parseFloat(e.target.value);
+                                        if (!isNaN(value)) setVadConfig(prev => ({ ...prev, min_volume: value }));
+                                    }}
+                                />
+                                <p className="text-xs text-muted-foreground">Volume threshold for speech (Def: 0.2 for Phone)</p>
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="vad_confidence" className="text-xs">
+                                    VAD Confidence (0-1)
+                                </Label>
+                                <Input
+                                    id="vad_confidence"
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    max="1"
+                                    value={vadConfig.confidence}
+                                    onChange={(e) => {
+                                        const value = parseFloat(e.target.value);
+                                        if (!isNaN(value)) setVadConfig(prev => ({ ...prev, confidence: value }));
+                                    }}
+                                />
+                                <p className="text-xs text-muted-foreground">Speech detection confidence (Def: 0.7)</p>
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="vad_start_secs" className="text-xs">
+                                    VAD Start Seconds
+                                </Label>
+                                <Input
+                                    id="vad_start_secs"
+                                    type="number"
+                                    step="0.1"
+                                    min="0"
+                                    value={vadConfig.start_secs}
+                                    onChange={(e) => {
+                                        const value = parseFloat(e.target.value);
+                                        if (!isNaN(value)) setVadConfig(prev => ({ ...prev, start_secs: value }));
+                                    }}
+                                />
+                                <p className="text-xs text-muted-foreground">Seconds of speech to start turn (Def: 0.2)</p>
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="vad_stop_secs" className="text-xs">
+                                    VAD Stop Seconds
+                                </Label>
+                                <Input
+                                    id="vad_stop_secs"
+                                    type="number"
+                                    step="0.1"
+                                    min="0"
+                                    value={vadConfig.stop_secs}
+                                    onChange={(e) => {
+                                        const value = parseFloat(e.target.value);
+                                        if (!isNaN(value)) setVadConfig(prev => ({ ...prev, stop_secs: value }));
+                                    }}
+                                />
+                                <p className="text-xs text-muted-foreground">Seconds of silence to end turn (Def: 0.2)</p>
+                            </div>
+                        </div>
+
+                        <div className="space-y-2 pt-2">
                             <Label htmlFor="turn_stop_strategy" className="text-xs">
-                                Detection Strategy
+                                Turn Disruption Strategy
                             </Label>
                             <Select
                                 value={turnStopStrategy}
