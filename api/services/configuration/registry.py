@@ -13,6 +13,7 @@ class ServiceType(Enum):
 
 class ServiceProviders(str, Enum):
     OPENAI = "openai"
+    FIREWORKS = "fireworks"
     DEEPGRAM = "deepgram"
     GROQ = "groq"
     OPENROUTER = "openrouter"
@@ -33,6 +34,7 @@ class ServiceProviders(str, Enum):
 class BaseServiceConfiguration(BaseModel):
     provider: Literal[
         ServiceProviders.OPENAI,
+        ServiceProviders.FIREWORKS,
         ServiceProviders.DEEPGRAM,
         ServiceProviders.GROQ,
         ServiceProviders.OPENROUTER,
@@ -122,6 +124,11 @@ OPENAI_MODELS = [
     "gpt-5-nano",
     "gpt-3.5-turbo",
 ]
+FIREWORKS_MODELS = [
+    "accounts/fireworks/models/firefunction-v2",
+    "accounts/fireworks/models/gpt-oss-120b",
+    "accounts/fireworks/models/llama-v3p3-70b-instruct",
+]
 GOOGLE_MODELS = [
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
@@ -156,6 +163,21 @@ class OpenAILLMService(BaseLLMConfiguration):
     provider: Literal[ServiceProviders.OPENAI] = ServiceProviders.OPENAI
     model: str = Field(default="gpt-4.1", json_schema_extra={"examples": OPENAI_MODELS})
     api_key: str
+
+
+@register_llm
+class FireworksLLMConfiguration(BaseLLMConfiguration):
+    provider: Literal[ServiceProviders.FIREWORKS] = ServiceProviders.FIREWORKS
+    model: str = Field(
+        default="accounts/fireworks/models/firefunction-v2",
+        json_schema_extra={"examples": FIREWORKS_MODELS},
+    )
+    api_key: str
+    base_url: str = Field(default="https://api.fireworks.ai/inference/v1")
+    temperature: float = Field(
+        default=0.1, ge=0.0, le=2.0,
+        description="Sampling temperature (0 = focused, 2 = creative)",
+    )
 
 
 @register_llm
@@ -253,6 +275,7 @@ class DeepInfraLLMConfiguration(BaseLLMConfiguration):
 LLMConfig = Annotated[
     Union[
         OpenAILLMService,
+        FireworksLLMConfiguration,
         GroqLLMService,
         OpenRouterLLMConfiguration,
         GoogleLLMService,

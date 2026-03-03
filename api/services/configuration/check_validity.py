@@ -32,6 +32,7 @@ class UserConfigurationValidator:
         self._provider_api_key_validity_status: Dict[str, bool] = {}
         self._validator_map = {
             ServiceProviders.OPENAI.value: self._check_openai_api_key,
+            ServiceProviders.FIREWORKS.value: self._check_fireworks_api_key,
             ServiceProviders.DEEPGRAM.value: self._check_deepgram_api_key,
             ServiceProviders.GROQ.value: self._check_groq_api_key,
             ServiceProviders.OPENROUTER.value: self._check_openrouter_api_key,
@@ -115,6 +116,10 @@ class UserConfigurationValidator:
         except openai.AuthenticationError:
             self._provider_api_key_validity_status[cache_key] = False
         return self._provider_api_key_validity_status[cache_key]
+
+    def _check_fireworks_api_key(self, model: str, api_key: str) -> bool:
+        # Keep validation lightweight and permissive like other OpenAI-compatible providers.
+        return True
 
     def _check_deepgram_api_key(self, model: str, api_key: str) -> bool:
         cache_key = f"{model}:{api_key}"

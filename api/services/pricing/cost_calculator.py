@@ -169,6 +169,10 @@ class CostCalculator:
         if any(keyword in model_lower for keyword in ["groq"]):
             return ServiceProviders.GROQ
 
+        # Fireworks models
+        if "fireworks" in model_lower:
+            return ServiceProviders.FIREWORKS
+
         # Elevenlabs models
         if any(keyword in model_lower for keyword in ["eleven"]):
             return ServiceProviders.ELEVENLABS
@@ -201,6 +205,10 @@ class CostCalculator:
         # Groq processors
         if any(keyword in processor_lower for keyword in ["groq"]):
             return ServiceProviders.GROQ
+
+        # Fireworks processors
+        if any(keyword in processor_lower for keyword in ["fireworks"]):
+            return ServiceProviders.FIREWORKS
 
         # Deepgram processors
         if any(keyword in processor_lower for keyword in ["deepgram"]):

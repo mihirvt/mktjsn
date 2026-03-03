@@ -133,6 +133,13 @@ LLM_PRICING: Dict[str, Dict[str, TokenPricingModel]] = {
             completion_token_price=Decimal("0.00079") / 1000,
         ),
     },
+    ServiceProviders.FIREWORKS: {
+        # Keep unknown model pricing safe by default until explicit per-model prices are added.
+        "default": TokenPricingModel(
+            prompt_token_price=Decimal("0") / 1000,
+            completion_token_price=Decimal("0") / 1000,
+        ),
+    },
     ServiceProviders.AZURE: {
         "gpt-4.1-mini": TokenPricingModel(
             prompt_token_price=Decimal("0.44") / 1000000,  # $0.40 per 1M tokens

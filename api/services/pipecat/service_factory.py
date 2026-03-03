@@ -14,6 +14,7 @@ from pipecat.services.dograh.llm import DograhLLMService
 from pipecat.services.dograh.stt import DograhSTTService
 from pipecat.services.dograh.tts import DograhTTSService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+from pipecat.services.fireworks.llm import FireworksLLMService
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.groq.llm import GroqLLMService
 from pipecat.services.openai.llm import OpenAILLMService
@@ -386,6 +387,18 @@ def create_llm_service(user_config):
             params=OpenAILLMService.InputParams(temperature=temperature),
         )
         return service
+    elif user_config.llm.provider == ServiceProviders.FIREWORKS.value:
+        temperature = getattr(user_config.llm, "temperature", 0.1)
+        if temperature is None:
+            temperature = 0.1
+        return FireworksLLMService(
+            api_key=user_config.llm.api_key,
+            model=model,
+            base_url=getattr(
+                user_config.llm, "base_url", "https://api.fireworks.ai/inference/v1"
+            ),
+            params=OpenAILLMService.InputParams(temperature=temperature),
+        )
     elif user_config.llm.provider == ServiceProviders.OPENROUTER.value:
         return OpenRouterLLMService(
             api_key=user_config.llm.api_key,
