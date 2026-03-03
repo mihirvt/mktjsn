@@ -15,6 +15,8 @@
       ? 'http://localhost:8000'
       : 'https://api.dograh.com'
   };
+  const INLINE_CONTAINER_MAX_RETRIES = 60;
+  const INLINE_CONTAINER_RETRY_DELAY_MS = 250;
 
   // Widget state
   const state = {
@@ -334,10 +336,7 @@
     // Find container element
     const container = document.getElementById(state.config.containerId);
     if (!container) {
-      console.error(`Dograh Widget: Container element with id "${state.config.containerId}" not found`);
-      if (state.callbacks.onError) {
-        state.callbacks.onError(new Error('Container element not found'));
-      }
+      waitForInlineContainer(0);
       return;
     }
 
@@ -452,6 +451,27 @@
 
     // Mark widget as open (for inline mode, it's always "open")
     state.isOpen = true;
+  }
+
+  /**
+   * Wait for inline container to appear (useful for React/SPA mounts)
+   */
+  function waitForInlineContainer(attempt) {
+    const container = document.getElementById(state.config.containerId);
+    if (container) {
+      createInlineWidget();
+      return;
+    }
+
+    if (attempt >= INLINE_CONTAINER_MAX_RETRIES) {
+      console.error(`Dograh Widget: Container element with id "${state.config.containerId}" not found`);
+      if (state.callbacks.onError) {
+        state.callbacks.onError(new Error('Container element not found'));
+      }
+      return;
+    }
+
+    setTimeout(() => waitForInlineContainer(attempt + 1), INLINE_CONTAINER_RETRY_DELAY_MS);
   }
 
   /**
@@ -970,7 +990,11 @@
     // Re-render the inline widget (useful when React component remounts)
     refresh: () => {
       if (state.config.embedMode === 'inline') {
-        // Re-render inline widget with current status
+        const container = document.getElementById(state.config.containerId);
+        if (!container) {
+          waitForInlineContainer(0);
+          return;
+        }
         updateInlineStatus(state.connectionStatus);
       }
     },
@@ -989,9 +1013,11 @@
       if (options.onError) state.callbacks.onError = options.onError;
       if (options.onStatusChange) state.callbacks.onStatusChange = options.onStatusChange;
 
-      // Initialize
+      // Initialize or switch from floating -> inline at runtime
       if (!state.isInitialized) {
         init();
+      } else {
+        createInlineWidget();
       }
     }
   };

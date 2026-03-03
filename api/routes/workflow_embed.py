@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 from typing import Optional
+from urllib.parse import urlencode, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -14,9 +15,54 @@ from api.services.auth.depends import get_user
 router = APIRouter(prefix="/workflow")
 
 
-def generate_embed_script(token: EmbedTokenModel) -> str:
+def _is_localhost_url(url: str) -> bool:
+    """Return True when URL points to localhost/loopback host."""
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    return host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
+
+
+def _extract_origin(url: str) -> Optional[str]:
+    """Extract scheme://host[:port] from an absolute URL."""
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _resolve_embed_endpoints(request: Request) -> tuple[str, str]:
+    """Resolve widget script host and API endpoint with sane production fallbacks."""
+    ui_base_url = str(UI_APP_URL).rstrip("/")
+    api_base_url = str(BACKEND_API_ENDPOINT).rstrip("/")
+
+    request_origin = request.headers.get("origin", "")
+    referer = request.headers.get("referer", "")
+    source_url = request_origin or referer
+    source_origin = _extract_origin(source_url) if source_url else None
+
+    if source_origin and _is_localhost_url(ui_base_url) and not _is_localhost_url(
+        source_origin
+    ):
+        ui_base_url = source_origin
+
+    if _is_localhost_url(api_base_url):
+        request_base = str(request.base_url).rstrip("/")
+        if request_base and not _is_localhost_url(request_base):
+            api_base_url = request_base
+
+    return ui_base_url, api_base_url
+
+
+def generate_embed_script(token: EmbedTokenModel, request: Request) -> str:
     """Generate the embed script for a given token."""
-    base_url = str(UI_APP_URL).rstrip("/")
+    base_url, api_endpoint = _resolve_embed_endpoints(request)
+    query = urlencode(
+        {
+            "token": token.token,
+            "environment": ENVIRONMENT,
+            "apiEndpoint": api_endpoint,
+        }
+    )
 
     return f"""<!-- Dograh Voice Widget -->
 <script>
@@ -24,7 +70,7 @@ def generate_embed_script(token: EmbedTokenModel) -> str:
     var js, fjs = d.getElementsByTagName(s)[0];
     if (d.getElementById(id)) return;
     js = d.createElement(s); js.id = id;
-    js.src = '{base_url}/embed/dograh-widget.js?token={token.token}&environment={ENVIRONMENT}&apiEndpoint={BACKEND_API_ENDPOINT}';
+    js.src = '{base_url}/embed/dograh-widget.js?{query}';
     js.async = true;
     fjs.parentNode.insertBefore(js, fjs);
   }}(document, 'script', 'dograh-widget'));
@@ -104,7 +150,7 @@ async def create_or_update_embed_token(
         )
 
     # Generate embed script
-    embed_script = generate_embed_script(token)
+    embed_script = generate_embed_script(token, request)
 
     return EmbedTokenResponse(
         id=token.id,
@@ -149,7 +195,7 @@ async def get_embed_token(
     token = tokens[0]  # There should be only one active token per workflow
 
     # Generate embed script
-    embed_script = generate_embed_script(token)
+    embed_script = generate_embed_script(token, request)
 
     return EmbedTokenResponse(
         id=token.id,
