@@ -151,12 +151,17 @@ class VoicemakerTTSService(TTSService):
         if self._ws is not None and not self._ws.closed:
             return
 
-        headers = {"Authorization": f"Bearer {self._api_key}"}
+        api_key = self._api_key.strip() if self._api_key else ""
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": "pipecat",
+        }
         try:
             if self._session is None:
                 self._session = aiohttp.ClientSession()
-            logger.debug(f"Voicemaker TTS: connecting to {VOICEMAKER_WS_URL}")
-            self._ws = await self._session.ws_connect(VOICEMAKER_WS_URL, headers=headers)
+            url = f"{VOICEMAKER_WS_URL}?token={api_key}"
+            logger.debug(f"Voicemaker TTS: connecting to {url} (auth in query + header)")
+            self._ws = await self._session.ws_connect(url, headers=headers)
             logger.info("Voicemaker TTS: WebSocket connected")
             self._receive_task = asyncio.create_task(self._receive_audio())
         except Exception as e:
@@ -222,11 +227,17 @@ class VoicemakerTTSService(TTSService):
             payload["Stability"] = str(p.stability)
         if p.similarity is not None:
             payload["Similarity"] = str(p.similarity)
+        # Use simple Engine instead of ProEngine in some mappings, but keep both for safety if uncertain
         if p.pro_engine is not None:
+            payload["Engine"] = p.pro_engine
             payload["ProEngine"] = p.pro_engine
         if p.accent_code is not None:
             payload["AccentCode"] = p.accent_code
 
+        # Add auth header inside the JSON payload as a robust fallback for WAFs that strip upgrade headers
+        api_key = self._api_key.strip() if self._api_key else ""
+        payload["Authorization"] = f"Bearer {api_key}"
+        
         try:
             logger.debug(f"Voicemaker sending payload: {json.dumps(payload)[:300]}")
             await self._ws.send_json(payload)
