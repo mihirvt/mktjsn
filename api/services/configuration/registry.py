@@ -870,13 +870,107 @@ class SpeechmaticsSTTConfiguration(BaseSTTConfiguration):
     api_key: str
 
 
-SONIOX_STT_MODELS = ["stt-rt-v4"]
+SONIOX_STT_MODELS = ["stt-rt-v4", "stt-rt-v3"]
+SONIOX_LANGUAGE_HINTS = [
+    "af",
+    "am",
+    "ar",
+    "as",
+    "az",
+    "be",
+    "bg",
+    "bn",
+    "bo",
+    "br",
+    "bs",
+    "ca",
+    "cs",
+    "cy",
+    "da",
+    "de",
+    "el",
+    "en",
+    "es",
+    "et",
+    "eu",
+    "fa",
+    "fi",
+    "fil",
+    "fr",
+    "gl",
+    "gu",
+    "ha",
+    "he",
+    "hi",
+    "hr",
+    "hu",
+    "hy",
+    "id",
+    "is",
+    "it",
+    "ja",
+    "jv",
+    "ka",
+    "kk",
+    "km",
+    "kn",
+    "ko",
+    "lo",
+    "lt",
+    "lv",
+    "mk",
+    "ml",
+    "mn",
+    "mr",
+    "ms",
+    "my",
+    "ne",
+    "nl",
+    "no",
+    "pa",
+    "pl",
+    "ps",
+    "pt",
+    "ro",
+    "ru",
+    "si",
+    "sk",
+    "sl",
+    "sq",
+    "sr",
+    "sv",
+    "sw",
+    "ta",
+    "te",
+    "th",
+    "tl",
+    "tr",
+    "uk",
+    "ur",
+    "uz",
+    "vi",
+    "yi",
+    "yo",
+    "zh",
+]
 
 @register_stt
 class SonioxSTTConfiguration(BaseSTTConfiguration):
     provider: Literal[ServiceProviders.SONIOX] = ServiceProviders.SONIOX
     model: str = Field(
         default="stt-rt-v4", json_schema_extra={"examples": SONIOX_STT_MODELS}
+    )
+    language_hints: list[str] = Field(
+        default_factory=list,
+        json_schema_extra={"examples": SONIOX_LANGUAGE_HINTS},
+        description="Expected ISO language codes (e.g. en, es).",
+    )
+    language_hints_strict: bool = Field(
+        default=False,
+        description=(
+            "Restrict recognition to language_hints. Best-effort; single-language "
+            "selection is most robust."
+        ),
     )
     api_key: str
 

@@ -11,17 +11,18 @@ import { useAuth } from '@/lib/auth';
 
 
 export type SaveUserConfigFunctionParams = {
+    [key: string]: unknown;
     llm?: {
-        [key: string]: string | number;
+        [key: string]: string | number | boolean | string[];
     } | null;
     tts?: {
-        [key: string]: string | number;
+        [key: string]: string | number | boolean | string[];
     } | null;
     stt?: {
-        [key: string]: string | number;
+        [key: string]: string | number | boolean | string[];
     } | null;
     embeddings?: {
-        [key: string]: string | number;
+        [key: string]: string | number | boolean | string[];
     } | null;
     test_phone_number?: string | null;
     timezone?: string | null;

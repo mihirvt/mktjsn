@@ -37,6 +37,46 @@ if TYPE_CHECKING:
     from api.services.pipecat.audio_config import AudioConfig
 
 
+def _parse_soniox_language_hints(raw_hints) -> list[Language]:
+    """Parse user-configured Soniox language hints into Pipecat Language enums."""
+    if raw_hints is None:
+        return []
+
+    if isinstance(raw_hints, str):
+        candidates = [raw_hints]
+    elif isinstance(raw_hints, list):
+        candidates = raw_hints
+    else:
+        logger.warning(f"Unsupported Soniox language_hints type: {type(raw_hints)}")
+        return []
+
+    parsed_hints: list[Language] = []
+    for value in candidates:
+        if not isinstance(value, str):
+            continue
+        normalized_value = value.strip()
+        if not normalized_value:
+            continue
+        try:
+            parsed_hints.append(Language(normalized_value))
+        except ValueError:
+            language_match = next(
+                (
+                    language
+                    for language in Language
+                    if str(language.value).lower() == normalized_value.lower()
+                ),
+                None,
+            )
+            if language_match:
+                parsed_hints.append(language_match)
+                continue
+
+            logger.warning(f"Ignoring unsupported Soniox language hint: {value}")
+
+    return parsed_hints
+
+
 def create_stt_service(
     user_config, audio_config: "AudioConfig", keyterms: list[str] | None = None
 ):
@@ -180,7 +220,26 @@ def create_stt_service(
     elif user_config.stt.provider == ServiceProviders.SONIOX.value:
         from pipecat.services.soniox.stt import SonioxInputParams, SonioxSTTService
 
-        params = SonioxInputParams(model=user_config.stt.model)
+        language_hints = _parse_soniox_language_hints(
+            getattr(user_config.stt, "language_hints", None)
+        )
+        language_hints_strict = getattr(user_config.stt, "language_hints_strict", None)
+
+        # Backward compatibility: if a legacy single `language` exists, treat it as one hint.
+        if not language_hints:
+            language_hints = _parse_soniox_language_hints(
+                getattr(user_config.stt, "language", None)
+            )
+
+        params = SonioxInputParams(
+            model=user_config.stt.model,
+            language_hints=language_hints or None,
+            language_hints_strict=(
+                bool(language_hints_strict)
+                if language_hints and language_hints_strict is not None
+                else None
+            ),
+        )
 
         return SonioxSTTService(
             api_key=user_config.stt.api_key,

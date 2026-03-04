@@ -18,9 +18,13 @@ type ServiceSegment = "llm" | "tts" | "stt" | "embeddings";
 
 interface SchemaProperty {
     type?: string;
-    default?: string | number | boolean;
+    default?: string | number | boolean | string[];
     enum?: string[];
-    examples?: string[];
+    examples?: Array<string | number>;
+    items?: {
+        enum?: string[];
+        examples?: Array<string | number>;
+    };
     model_options?: Record<string, string[]>;
     $ref?: string;
     description?: string;
@@ -35,7 +39,7 @@ interface ProviderSchema {
 }
 
 interface FormValues {
-    [key: string]: string | number | boolean;
+    [key: string]: string | number | boolean | string[];
 }
 
 const TAB_CONFIG: { key: ServiceSegment; label: string }[] = [
@@ -189,6 +193,7 @@ const LANGUAGE_DISPLAY_NAMES: Record<string, string> = {
     "ha": "Hausa",
     "ba": "Bashkir",
     "jw": "Javanese",
+    "jv": "Javanese",
     "su": "Sundanese",
     "yue": "Cantonese",
     // Voicemaker-specific
@@ -262,7 +267,7 @@ export default function ServiceConfiguration() {
                 return;
             }
 
-            const defaultValues: Record<string, string | number | boolean> = {};
+            const defaultValues: Record<string, string | number | boolean | string[]> = {};
             const selectedProviders: Record<ServiceSegment, string> = {
                 llm: response.data.default_providers.llm,
                 tts: response.data.default_providers.tts,
@@ -282,7 +287,7 @@ export default function ServiceConfiguration() {
                     const properties = response.data[service]?.[selectedProviders[service]]?.properties as Record<string, SchemaProperty>;
                     if (properties) {
                         Object.entries(properties).forEach(([field, schema]) => {
-                            if (field !== "provider" && schema.default) {
+                            if (field !== "provider" && schema.default !== undefined) {
                                 defaultValues[`${service}_${field}`] = schema.default;
                             }
                         });
@@ -367,7 +372,7 @@ export default function ServiceConfiguration() {
         }
 
         const currentValues = getValues();
-        const preservedValues: Record<string, string | number | boolean> = {};
+        const preservedValues: Record<string, string | number | boolean | string[]> = {};
 
         // Preserve values from other services
         Object.keys(currentValues).forEach(key => {
@@ -399,7 +404,7 @@ export default function ServiceConfiguration() {
         setApiError(null);
         setIsSaving(true);
 
-        const userConfig: Record<ServiceSegment, Record<string, string | number>> = {
+        const userConfig: Record<ServiceSegment, Record<string, string | number | boolean | string[]>> = {
             llm: {
                 provider: serviceProviders.llm,
                 api_key: data.llm_api_key as string,
@@ -427,16 +432,17 @@ export default function ServiceConfiguration() {
             const field = parts.slice(1).join('_');
 
             if (userConfig[service] && !(field in userConfig[service])) {
-                (userConfig[service] as Record<string, string>)[field] = value as string;
+                (userConfig[service] as Record<string, string | number | boolean | string[]>)[field] =
+                    value as string | number | boolean | string[];
             }
         });
 
         // Build save config - only include embeddings if api_key is provided
         const saveConfig: {
-            llm: Record<string, string | number>;
-            tts: Record<string, string | number>;
-            stt: Record<string, string | number>;
-            embeddings?: Record<string, string | number>;
+            llm: Record<string, string | number | boolean | string[]>;
+            tts: Record<string, string | number | boolean | string[]>;
+            stt: Record<string, string | number | boolean | string[]>;
+            embeddings?: Record<string, string | number | boolean | string[]>;
         } = {
             llm: userConfig.llm,
             tts: userConfig.tts,
@@ -578,7 +584,7 @@ export default function ServiceConfiguration() {
         // Handle model field with manual input toggle (uses examples from schema)
         if (field === "model" && actualSchema?.examples) {
             const currentValue = watch(`${service}_${field}`) as string || "";
-            const modelOptions = actualSchema.examples;
+            const modelOptions = actualSchema.examples.map((value) => String(value));
 
             if (isManualModelInput[service]) {
                 return (
@@ -627,7 +633,7 @@ export default function ServiceConfiguration() {
                             <SelectValue placeholder="Select model" />
                         </SelectTrigger>
                         <SelectContent>
-                            {modelOptions.map((value: string) => (
+                            {modelOptions.map((value) => (
                                 <SelectItem key={value} value={value}>
                                     {value}
                                 </SelectItem>
@@ -653,6 +659,61 @@ export default function ServiceConfiguration() {
             );
         }
 
+        const getDisplayName = (value: string) => {
+            if (field === "language" || field === "language_hints") {
+                return LANGUAGE_DISPLAY_NAMES[value] || value;
+            }
+            if (field === "voice") {
+                return VOICE_DISPLAY_NAMES[value] || value.charAt(0).toUpperCase() + value.slice(1);
+            }
+            return value;
+        };
+
+        if (actualSchema?.type === "array") {
+            const arrayOptions =
+                actualSchema.items?.enum || actualSchema.items?.examples || actualSchema.examples;
+            const selectedValues = (watch(`${service}_${field}`) as string[] | undefined) || [];
+
+            if (arrayOptions && arrayOptions.length > 0) {
+                const stringOptions = arrayOptions.map((value) => String(value));
+
+                return (
+                    <div className="space-y-2">
+                        <div className="max-h-52 overflow-y-auto rounded-md border p-3 space-y-2">
+                            {stringOptions.map((value) => {
+                                const checked = selectedValues.includes(value);
+                                return (
+                                    <div key={value} className="flex items-center space-x-2">
+                                        <Checkbox
+                                            id={`${service}_${field}_${value}`}
+                                            checked={checked}
+                                            onCheckedChange={(isChecked) => {
+                                                const nextValues = isChecked
+                                                    ? Array.from(new Set([...selectedValues, value]))
+                                                    : selectedValues.filter((selected) => selected !== value);
+                                                setValue(`${service}_${field}`, nextValues, { shouldDirty: true });
+                                            }}
+                                        />
+                                        <Label
+                                            htmlFor={`${service}_${field}_${value}`}
+                                            className="text-sm font-normal cursor-pointer"
+                                        >
+                                            {getDisplayName(value)}
+                                        </Label>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        {field === "language_hints" && (
+                            <p className="text-xs text-muted-foreground">
+                                Use one language when possible. Multiple languages are supported but less robust.
+                            </p>
+                        )}
+                    </div>
+                );
+            }
+        }
+
         // Handle fields with enum or examples (dropdown options)
         let dropdownOptions = actualSchema?.enum || actualSchema?.examples;
 
@@ -665,17 +726,6 @@ export default function ServiceConfiguration() {
         }
 
         if (dropdownOptions && dropdownOptions.length > 0) {
-            // Use friendly display names for language and voice fields
-            const getDisplayName = (value: string) => {
-                if (field === "language") {
-                    return LANGUAGE_DISPLAY_NAMES[value] || value;
-                }
-                if (field === "voice") {
-                    return VOICE_DISPLAY_NAMES[value] || value.charAt(0).toUpperCase() + value.slice(1);
-                }
-                return value;
-            };
-
             // Radix Select always compares values as strings.
             // Schema examples for integer fields (e.g. sample rates) are numbers,
             // so we must stringify every option AND the current watched value.
