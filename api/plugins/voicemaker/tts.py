@@ -153,15 +153,14 @@ class VoicemakerTTSService(TTSService):
 
         api_key = self._api_key.strip() if self._api_key else ""
         headers = {
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": api_key,
             "User-Agent": "pipecat",
         }
         try:
             if self._session is None:
                 self._session = aiohttp.ClientSession()
-            url = f"{VOICEMAKER_WS_URL}?token={api_key}"
-            logger.debug(f"Voicemaker TTS: connecting to {url} (auth in query + header)")
-            self._ws = await self._session.ws_connect(url, headers=headers)
+            logger.debug(f"Voicemaker TTS: connecting to {VOICEMAKER_WS_URL}")
+            self._ws = await self._session.ws_connect(VOICEMAKER_WS_URL, headers=headers)
             logger.info("Voicemaker TTS: WebSocket connected")
             self._receive_task = asyncio.create_task(self._receive_audio())
         except Exception as e:
@@ -233,10 +232,6 @@ class VoicemakerTTSService(TTSService):
             payload["ProEngine"] = p.pro_engine
         if p.accent_code is not None:
             payload["AccentCode"] = p.accent_code
-
-        # Add auth header inside the JSON payload as a robust fallback for WAFs that strip upgrade headers
-        api_key = self._api_key.strip() if self._api_key else ""
-        payload["Authorization"] = f"Bearer {api_key}"
         
         try:
             logger.debug(f"Voicemaker sending payload: {json.dumps(payload)[:300]}")
