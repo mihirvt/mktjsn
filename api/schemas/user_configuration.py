@@ -6,7 +6,9 @@ from pydantic import BaseModel, model_validator
 from api.services.configuration.registry import (
     EmbeddingsConfig,
     LLMConfig,
+    REGISTRY,
     STTConfig,
+    ServiceType,
     TTSConfig,
 )
 
@@ -24,13 +26,27 @@ class UserConfiguration(BaseModel):
     @classmethod
     def strip_deprecated_providers(cls, data: Any) -> Any:
         if isinstance(data, dict):
+            service_to_type = {
+                "llm": ServiceType.LLM,
+                "stt": ServiceType.STT,
+                "tts": ServiceType.TTS,
+                "embeddings": ServiceType.EMBEDDINGS,
+            }
             for service in ["llm", "stt", "tts", "embeddings"]:
                 if service in data and isinstance(data[service], dict):
-                    if data[service].get("provider") == "gemini":
+                    provider = data[service].get("provider")
+                    if provider == "gemini":
                         # If a legacy 'gemini' provider is found, remove it so it doesn't break Pydantic validation
                         # The system will automatically fall back to the defaults instead of crashing
                         data[service] = None
                         continue
+
+                    if isinstance(provider, str):
+                        service_type = service_to_type[service]
+                        if provider not in REGISTRY[service_type]:
+                            # Keep other service configs intact when one stale provider is present.
+                            data[service] = None
+                            continue
 
                     # Normalize API keys copied from dashboards/editors that may include
                     # invisible Unicode separators (e.g. U+2028) or trailing whitespace.
