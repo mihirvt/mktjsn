@@ -563,6 +563,11 @@ VOICEMAKER_OUTPUT_FORMATS = ["mp3", "wav", "ogg", "opus", "aac", "ulaw", "alaw"]
 VOICEMAKER_TELEPHONY_SAMPLE_RATES = [8000, 16000, 22050, 24000]
 VOICEMAKER_WEB_SAMPLE_RATES = [22050, 24000, 44100, 48000]
 VOICEMAKER_PRO_ENGINES = ["highres", "turbo", "expressive"]
+VOICEMAKER_ACCENT_CODES = [
+    "en-US", "en-GB", "en-AU", "en-CA", "en-IN",
+    "hi-IN", "bn-IN", "ta-IN", "te-IN", "kn-IN", "ml-IN", "gu-IN", "mr-IN", "pa-IN",
+    "fr-FR", "fr-CA", "de-DE", "es-ES", "es-US", "pt-BR", "it-IT", "ja-JP"
+]
 
 
 @register_tts
@@ -575,7 +580,6 @@ class VoicemakerTTSConfiguration(BaseTTSConfiguration):
     )
     voice: str = Field(
         default="ai3-Jony",
-        json_schema_extra={"examples": VOICEMAKER_TTS_VOICES},
         description="Voicemaker VoiceId (e.g. ai3-Jony)",
     )
     language: str = Field(
@@ -615,10 +619,14 @@ class VoicemakerTTSConfiguration(BaseTTSConfiguration):
     # ProPlus-only (optional floats so the UI can pass numbers directly)
     stability: Union[float, None] = Field(
         default=None,
+        ge=0.0,
+        le=100.0,
         description="Stability 0-100 (ProPlus voices only)",
     )
     similarity: Union[float, None] = Field(
         default=None,
+        ge=0.0,
+        le=100.0,
         description="Similarity 0-100 (ProPlus voices only)",
     )
     pro_engine: Union[str, None] = Field(
@@ -628,6 +636,7 @@ class VoicemakerTTSConfiguration(BaseTTSConfiguration):
     )
     accent_code: Union[str, None] = Field(
         default=None,
+        json_schema_extra={"examples": VOICEMAKER_ACCENT_CODES},
         description="Accent code for multilingual voices (e.g. en-US, fr-FR)",
     )
     api_key: str

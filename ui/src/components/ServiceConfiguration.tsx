@@ -559,9 +559,18 @@ export default function ServiceConfiguration() {
 
     const renderField = (service: ServiceSegment, field: string, providerSchema: ProviderSchema) => {
         const schema = providerSchema.properties[field];
-        const actualSchema = schema.$ref && providerSchema.$defs
+        let actualSchema = schema.$ref && providerSchema.$defs
             ? providerSchema.$defs[schema.$ref.split('/').pop() || '']
             : schema;
+
+        // Extract type from anyOf for nullable fields like Union[float, None]
+        const schemaData = actualSchema as any;
+        if (schemaData?.anyOf && Array.isArray(schemaData.anyOf)) {
+            const nonNullType = schemaData.anyOf.find((t: any) => t.type !== "null");
+            if (nonNullType) {
+                actualSchema = { ...actualSchema, ...nonNullType };
+            }
+        }
 
         // Use VoiceSelector for voice field in TTS service (except Sarvam which uses predefined options)
         if (service === "tts" && field === "voice") {
@@ -780,15 +789,48 @@ export default function ServiceConfiguration() {
             );
         }
 
+        const isNumber = actualSchema?.type === "number" || actualSchema?.type === "integer";
+        const schemaAny = actualSchema as any;
+        const isRange = isNumber && schemaAny?.minimum !== undefined && schemaAny?.maximum !== undefined;
+
+        if (isRange) {
+            return (
+                <div className="flex items-center space-x-4">
+                    <input
+                        type="range"
+                        min={schemaAny.minimum}
+                        max={schemaAny.maximum}
+                        step={actualSchema?.type === "integer" ? 1 : "any"}
+                        className="w-full h-2 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary"
+                        value={watch(`${service}_${field}`) as number || 0}
+                        onChange={(e) => {
+                            setValue(`${service}_${field}`, Number(e.target.value), { shouldDirty: true });
+                        }}
+                    />
+                    <Input
+                        type="number"
+                        className="w-20"
+                        min={schemaAny.minimum}
+                        max={schemaAny.maximum}
+                        step={actualSchema?.type === "integer" ? 1 : "any"}
+                        {...register(`${service}_${field}`, {
+                            required: service !== "embeddings" && providerSchema.required?.includes(field),
+                            valueAsNumber: true
+                        })}
+                    />
+                </div>
+            );
+        }
+
         return (
             <Input
-                type={actualSchema?.type === "number" ? "number" : "text"}
-                {...(actualSchema?.type === "number" && { step: "any" })}
+                type={isNumber ? "number" : "text"}
+                {...(isNumber && { step: "any" })}
                 placeholder={`Enter ${field}`}
                 {...register(`${service}_${field}`, {
                     // Embeddings is optional, so don't require its fields
                     required: service !== "embeddings" && providerSchema.required?.includes(field),
-                    valueAsNumber: actualSchema?.type === "number"
+                    valueAsNumber: isNumber
                 })}
             />
         );
