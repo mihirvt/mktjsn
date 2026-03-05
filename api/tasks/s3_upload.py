@@ -4,6 +4,7 @@ from typing import Optional
 from loguru import logger
 
 from api.db import db_client
+from api.services.storage_keys import build_storage_key
 from api.services.storage import get_current_storage_backend, storage_fs
 from api.tasks.run_integrations import run_integrations_post_workflow_run
 from pipecat.utils.run_context import set_current_run_id
@@ -43,15 +44,16 @@ async def upload_voicemail_audio_to_s3(
         logger.debug(f"Voicemail audio file size: {file_size} bytes")
 
         # Upload to S3
-        upload_ok = await storage_fs.aupload_file(temp_file_path, s3_key)
+        resolved_key = build_storage_key(s3_key)
+        upload_ok = await storage_fs.aupload_file(temp_file_path, resolved_key)
 
         if upload_ok:
-            logger.info(f"Successfully uploaded voicemail audio to S3: {s3_key}")
+            logger.info(f"Successfully uploaded voicemail audio to S3: {resolved_key}")
         else:
             logger.error(
                 f"Failed to upload voicemail audio to S3 for workflow {workflow_run_id}"
             )
-            raise Exception(f"S3 upload failed for {s3_key}")
+            raise Exception(f"S3 upload failed for {resolved_key}")
 
     except Exception as e:
         logger.error(
@@ -101,7 +103,7 @@ async def process_workflow_completion(
                 file_size = os.path.getsize(audio_temp_path)
                 logger.debug(f"Audio file size: {file_size} bytes")
 
-                recording_url = f"recordings/{workflow_run_id}.wav"
+                recording_url = build_storage_key(f"recordings/{workflow_run_id}.wav")
                 logger.info(
                     f"Uploading audio to {storage_backend.name} - workflow_run_id: {workflow_run_id}"
                 )
@@ -132,7 +134,9 @@ async def process_workflow_completion(
                 file_size = os.path.getsize(transcript_temp_path)
                 logger.debug(f"Transcript file size: {file_size} bytes")
 
-                transcript_url = f"transcripts/{workflow_run_id}.txt"
+                transcript_url = build_storage_key(
+                    f"transcripts/{workflow_run_id}.txt"
+                )
                 logger.info(
                     f"Uploading transcript to {storage_backend.name} - workflow_run_id: {workflow_run_id}"
                 )

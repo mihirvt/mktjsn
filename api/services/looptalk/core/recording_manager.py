@@ -8,6 +8,7 @@ from loguru import logger
 
 from api.enums import StorageBackend
 from api.services.storage import storage_fs
+from api.services.storage_keys import build_storage_key
 
 
 class RecordingManager:
@@ -117,7 +118,9 @@ class RecordingManager:
 
         # Upload audio if exists
         if paths["audio"].exists():
-            audio_key = f"looptalk/recordings/{test_session_id}/{role}_audio.wav"
+            audio_key = build_storage_key(
+                f"looptalk/recordings/{test_session_id}/{role}_audio.wav"
+            )
             try:
                 success = await storage_fs.aupload_file(str(paths["audio"]), audio_key)
                 if success:
@@ -136,7 +139,7 @@ class RecordingManager:
 
         # Upload transcript if exists
         if paths["transcript"].exists():
-            transcript_key = (
+            transcript_key = build_storage_key(
                 f"looptalk/transcripts/{test_session_id}/{role}_transcript.txt"
             )
             try:

@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Optional
 
 from api.enums import Environment
 
@@ -43,6 +44,16 @@ MINIO_SECURE = os.getenv("MINIO_SECURE", "false").lower() == "true"
 # AWS S3 Configuration
 S3_BUCKET = os.environ.get("S3_BUCKET")
 S3_REGION = os.environ.get("S3_REGION", "us-east-1")
+
+
+def _normalize_storage_key_prefix(prefix: Optional[str]) -> str:
+    """Normalize a storage key prefix by trimming whitespace and slashes."""
+    if not prefix:
+        return ""
+    return prefix.strip().strip("/")
+
+
+S3_KEY_PREFIX = _normalize_storage_key_prefix(os.environ.get("S3_KEY_PREFIX", ""))
 
 # Sentry configuration
 SENTRY_DSN = os.getenv("SENTRY_DSN")

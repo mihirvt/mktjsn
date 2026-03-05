@@ -11,6 +11,7 @@ from api.db import db_client
 from api.enums import StorageBackend
 from api.services.auth.depends import get_user
 from api.services.storage import get_storage_for_backend, storage_fs
+from api.services.storage_keys import strip_storage_prefix
 
 
 class S3SignedUrlResponse(TypedDict):
@@ -55,12 +56,15 @@ async def _validate_and_extract_workflow_run_id(
     Raises:
         HTTPException: If key format is invalid
     """
-    if key.startswith("transcripts/") and key.endswith(".txt"):
-        run_id_str = key[len("transcripts/") : -4]  # strip prefix & suffix
-    elif key.startswith("recordings/") and key.endswith(".wav"):
-        run_id_str = key[len("recordings/") : -4]
+    normalized_key = strip_storage_prefix(key)
+
+    if normalized_key.startswith("transcripts/") and normalized_key.endswith(".txt"):
+        run_id_str = normalized_key[len("transcripts/") : -4]  # strip prefix & suffix
+    elif normalized_key.startswith("recordings/") and normalized_key.endswith(".wav"):
+        run_id_str = normalized_key[len("recordings/") : -4]
     elif allow_special_paths and (
-        key.startswith("looptalk/") or key.startswith("voicemail_detections/")
+        normalized_key.startswith("looptalk/")
+        or normalized_key.startswith("voicemail_detections/")
     ):
         # Allow looptalk and voicemail paths for debugging (only if explicitly allowed)
         return None  # Skip validation for these paths
