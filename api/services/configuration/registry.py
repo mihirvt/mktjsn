@@ -131,6 +131,8 @@ FIREWORKS_MODELS = [
     "accounts/fireworks/models/llama-v3p3-70b-instruct",
 ]
 GOOGLE_MODELS = [
+    "gemini-3.0-flash",
+    "gemini-3.0-flash-lite-preview",
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
     "gemini-2.5-flash",
@@ -189,6 +191,7 @@ class GoogleLLMService(BaseLLMConfiguration):
     )
     api_key: str
     temperature: Union[float, None] = Field(default=0.1)
+    thinking_level: Union[str, None] = Field(default=None)
 
 
 @register_llm

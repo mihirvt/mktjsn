@@ -76,7 +76,7 @@ class UserConfiguration(BaseModel):
                 for key, val in list(cfg.items()):
                     if isinstance(val, str) and key not in ("provider", "api_key", "model",
                             "voice", "language", "base_url", "reasoning_effort",
-                            "operating_point"):
+                            "operating_point", "thinking_level"):
                         try:
                             cfg[key] = float(val) if val else None
                         except (ValueError, TypeError):
