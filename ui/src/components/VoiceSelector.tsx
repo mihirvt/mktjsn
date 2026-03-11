@@ -13,13 +13,14 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils";
 
 // Providers that have MPS voice endpoints
-type TTSProviderWithVoices = "elevenlabs" | "deepgram" | "sarvam" | "cartesia" | "dograh" | "smallest_ai" | "voicemaker";
-const MPS_VOICE_PROVIDERS: TTSProviderWithVoices[] = ["elevenlabs", "deepgram", "sarvam", "cartesia", "dograh", "smallest_ai", "voicemaker"];
+type TTSProviderWithVoices = "elevenlabs" | "deepgram" | "sarvam" | "cartesia" | "dograh" | "smallest_ai" | "voicemaker" | "murf";
+const MPS_VOICE_PROVIDERS: TTSProviderWithVoices[] = ["elevenlabs", "deepgram", "sarvam", "cartesia", "dograh", "smallest_ai", "voicemaker", "murf"];
 
 interface VoiceSelectorProps {
     provider: string;
     value: string;
     onChange: (voiceId: string) => void;
+    onVoicesLoaded?: (voices: VoiceInfo[]) => void;
     className?: string;
 }
 
@@ -27,6 +28,7 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
     provider,
     value,
     onChange,
+    onVoicesLoaded,
     className,
 }) => {
     const [isOpen, setIsOpen] = useState(false);
@@ -54,6 +56,7 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
             dograh: "dograh",
             smallest_ai: "smallest_ai",
             voicemaker: "voicemaker",
+            murf: "murf",
         };
         return providerMap[providerName.toLowerCase()] || null;
     }, []);
@@ -75,15 +78,19 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
 
             if (response.data?.voices) {
                 setVoices(response.data.voices);
+                onVoicesLoaded?.(response.data.voices);
+            } else {
+                onVoicesLoaded?.([]);
             }
         } catch (err) {
             console.error("Failed to fetch voices:", err);
             setError("Failed to load voices");
             setVoices([]);
+            onVoicesLoaded?.([]);
         } finally {
             setIsLoading(false);
         }
-    }, [provider, getProviderKey]);
+    }, [provider, getProviderKey, onVoicesLoaded]);
 
     useEffect(() => {
         if (provider) {

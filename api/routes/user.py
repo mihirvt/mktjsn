@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from typing import Any, List, Literal, Optional, TypedDict, Union
+from typing import Any, Dict, List, Literal, Optional, TypedDict, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
@@ -322,7 +322,7 @@ async def reactivate_api_key(
 
 
 # Voice Configuration Endpoints
-TTSProvider = Literal["elevenlabs", "deepgram", "sarvam", "cartesia", "dograh", "smallest_ai", "voicemaker"]
+TTSProvider = Literal["elevenlabs", "deepgram", "sarvam", "cartesia", "dograh", "smallest_ai", "voicemaker", "murf"]
 
 
 class VoiceInfo(BaseModel):
@@ -333,6 +333,8 @@ class VoiceInfo(BaseModel):
     gender: Optional[str] = None
     language: Optional[str] = None
     preview_url: Optional[str] = None
+    supported_locales: Optional[List[str]] = None
+    styles_by_locale: Optional[Dict[str, List[str]]] = None
 
 
 class VoicesResponse(BaseModel):
@@ -434,6 +436,58 @@ async def get_voices(
                     f"Voicemaker voice list API error: {res.status_code} {res.text[:300]}"
                 )
                 return VoicesResponse(provider="voicemaker", voices=[])
+
+        if provider == "murf":
+            user_config = await db_client.get_user_configurations(user.id)
+            api_key = None
+            if user_config.tts:
+                provider_val = (
+                    user_config.tts.provider.value
+                    if hasattr(user_config.tts.provider, "value")
+                    else user_config.tts.provider
+                )
+                if provider_val == "murf":
+                    api_key = getattr(user_config.tts, "api_key", None)
+
+            if not api_key:
+                return VoicesResponse(provider="murf", voices=[])
+
+            import httpx
+
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.get(
+                    "https://api.murf.ai/v1/speech/voices",
+                    params={"model": "FALCON"},
+                    headers={"api-key": api_key},
+                )
+
+            if res.status_code == 200:
+                voice_list = res.json()
+                voices = []
+                for voice in voice_list:
+                    supported_locales_raw = voice.get("supportedLocales") or {}
+                    supported_locales = list(supported_locales_raw.keys())
+                    styles_by_locale = {
+                        locale: locale_details.get("availableStyles", [])
+                        for locale, locale_details in supported_locales_raw.items()
+                    }
+                    primary_locale = voice.get("locale") or (supported_locales[0] if supported_locales else None)
+                    voices.append(
+                        VoiceInfo(
+                            voice_id=voice.get("voiceId", ""),
+                            name=voice.get("displayName", voice.get("voiceId", "")),
+                            description=voice.get("description"),
+                            accent=voice.get("accent"),
+                            gender=voice.get("gender"),
+                            language=primary_locale,
+                            supported_locales=supported_locales or None,
+                            styles_by_locale=styles_by_locale or None,
+                        )
+                    )
+                return VoicesResponse(provider="murf", voices=voices)
+
+            logger.error(f"Failed to fetch Murf voices: {res.status_code} {res.text[:300]}")
+            return VoicesResponse(provider="murf", voices=[])
 
         result = await mps_service_key_client.get_voices(
             provider=provider,

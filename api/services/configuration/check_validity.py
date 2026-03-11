@@ -47,6 +47,7 @@ class UserConfigurationValidator:
             ServiceProviders.DEEPINFRA.value: self._check_deepinfra_api_key,
             ServiceProviders.SONIOX.value: self._check_soniox_api_key,
             ServiceProviders.VOICEMAKER.value: self._check_voicemaker_api_key,
+            ServiceProviders.MURF.value: self._check_murf_api_key,
         }
 
     async def validate(self, configuration: UserConfiguration) -> APIKeyStatusResponse:
@@ -226,4 +227,7 @@ class UserConfigurationValidator:
 
     def _check_voicemaker_api_key(self, model: str, api_key: str) -> bool:
         """Simple presence check – Voicemaker API keys are just non-empty strings."""
+        return bool(api_key and api_key.strip())
+
+    def _check_murf_api_key(self, model: str, api_key: str) -> bool:
         return bool(api_key and api_key.strip())

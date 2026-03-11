@@ -29,6 +29,7 @@ class ServiceProviders(str, Enum):
     DEEPINFRA = "deepinfra"
     SONIOX = "soniox"
     VOICEMAKER = "voicemaker"
+    MURF = "murf"
 
 
 class BaseServiceConfiguration(BaseModel):
@@ -569,6 +570,24 @@ VOICEMAKER_ACCENT_CODES = [
     "fr-FR", "fr-CA", "de-DE", "es-ES", "es-US", "pt-BR", "it-IT", "ja-JP"
 ]
 
+MURF_TTS_MODELS = ["FALCON"]
+MURF_REGIONS = [
+    "global",
+    "us-east",
+    "us-west",
+    "in",
+    "ca",
+    "kr",
+    "me",
+    "jp",
+    "au",
+    "eu-central",
+    "uk",
+    "sa-east",
+]
+MURF_TELEPHONY_SAMPLE_RATES = [8000, 16000]
+MURF_WEB_SAMPLE_RATES = [16000, 24000]
+
 
 @register_tts
 class VoicemakerTTSConfiguration(BaseTTSConfiguration):
@@ -642,6 +661,68 @@ class VoicemakerTTSConfiguration(BaseTTSConfiguration):
     api_key: str
 
 
+@register_tts
+class MurfTTSConfiguration(BaseTTSConfiguration):
+    provider: Literal[ServiceProviders.MURF] = ServiceProviders.MURF
+    model: str = Field(
+        default="FALCON",
+        json_schema_extra={"examples": MURF_TTS_MODELS},
+        description="Murf realtime TTS model",
+    )
+    voice: str = Field(
+        default="Matthew",
+        description="Murf voice ID",
+    )
+    locale: str = Field(
+        default="en-US",
+        description="Locale supported by the selected Murf voice",
+    )
+    style: str = Field(
+        default="Conversation",
+        description="Speech style supported by the selected Murf voice",
+    )
+    rate: int = Field(
+        default=0,
+        ge=-50,
+        le=50,
+        description="Speech rate from -50 to 50",
+    )
+    pitch: int = Field(
+        default=0,
+        ge=-50,
+        le=50,
+        description="Speech pitch from -50 to 50",
+    )
+    min_buffer_size: int = Field(
+        default=40,
+        ge=40,
+        le=160,
+        description="Minimum characters Murf buffers before synthesizing incomplete text",
+    )
+    max_buffer_delay_in_ms: int = Field(
+        default=300,
+        ge=0,
+        le=1000,
+        description="Maximum wait before Murf synthesizes incomplete text",
+    )
+    region: str = Field(
+        default="us-east",
+        json_schema_extra={"examples": MURF_REGIONS},
+        description="Murf streaming region",
+    )
+    telephony_sample_rate: int = Field(
+        default=8000,
+        json_schema_extra={"examples": MURF_TELEPHONY_SAMPLE_RATES},
+        description="Sample rate for telephony calls",
+    )
+    web_sample_rate: int = Field(
+        default=16000,
+        json_schema_extra={"examples": MURF_WEB_SAMPLE_RATES},
+        description="Sample rate for web/WebRTC calls",
+    )
+    api_key: str
+
+
 TTSConfig = Annotated[
     Union[
         DeepgramTTSConfiguration,
@@ -652,6 +733,7 @@ TTSConfig = Annotated[
         SarvamTTSConfiguration,
         SmallestAITTSConfiguration,
         VoicemakerTTSConfiguration,
+        MurfTTSConfiguration,
     ],
     Field(discriminator="provider"),
 ]

@@ -1202,6 +1202,8 @@ export type VoiceInfo = {
     gender?: string | null;
     language?: string | null;
     preview_url?: string | null;
+    supported_locales?: Array<string> | null;
+    styles_by_locale?: Record<string, Array<string>> | null;
 };
 
 export type VoicesResponse = {
@@ -2656,7 +2658,7 @@ export type GetVoicesApiV1UserConfigurationsVoicesProviderGetData = {
         'X-API-Key'?: string | null;
     };
     path: {
-        provider: 'elevenlabs' | 'deepgram' | 'sarvam' | 'cartesia' | 'dograh' | 'smallest_ai' | 'voicemaker';
+        provider: 'elevenlabs' | 'deepgram' | 'sarvam' | 'cartesia' | 'dograh' | 'smallest_ai' | 'voicemaker' | 'murf';
     };
     query?: never;
     url: '/api/v1/user/configurations/voices/{provider}';

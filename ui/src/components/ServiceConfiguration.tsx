@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 
 import { getDefaultConfigurationsApiV1UserConfigurationsDefaultsGet } from '@/client/sdk.gen';
+import type { VoiceInfo } from "@/client/types.gen";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -29,6 +30,13 @@ interface SchemaProperty {
     $ref?: string;
     description?: string;
     format?: string;
+    anyOf?: Array<{
+        type?: string;
+        minimum?: number;
+        maximum?: number;
+    }>;
+    minimum?: number;
+    maximum?: number;
 }
 
 interface ProviderSchema {
@@ -241,6 +249,7 @@ export default function ServiceConfiguration() {
         stt: false,
         embeddings: false
     });
+    const [murfVoices, setMurfVoices] = useState<VoiceInfo[]>([]);
 
     const {
         register,
@@ -351,6 +360,32 @@ export default function ServiceConfiguration() {
             setValue("tts_voice", validVoices[0], { shouldDirty: true });
         }
     }, [ttsModel, serviceProviders.tts, setValue, getValues, schemas]);
+
+    const selectedMurfVoice = watch("tts_voice") as string | undefined;
+    const selectedMurfLocale = watch("tts_locale") as string | undefined;
+    useEffect(() => {
+        if (serviceProviders.tts !== "murf") {
+            return;
+        }
+
+        const murfVoice = murfVoices.find((voice) => voice.voice_id === selectedMurfVoice);
+        const validLocales = murfVoice?.supported_locales || [];
+        if (validLocales.length > 0) {
+            const currentLocale = getValues("tts_locale") as string | undefined;
+            if (!currentLocale || !validLocales.includes(currentLocale)) {
+                setValue("tts_locale", validLocales[0], { shouldDirty: true });
+            }
+        }
+
+        const effectiveLocale = (getValues("tts_locale") as string | undefined) || validLocales[0];
+        const validStyles = murfVoice?.styles_by_locale?.[effectiveLocale || ""] || [];
+        if (validStyles.length > 0) {
+            const currentStyle = getValues("tts_style") as string | undefined;
+            if (!currentStyle || !validStyles.includes(currentStyle)) {
+                setValue("tts_style", validStyles[0], { shouldDirty: true });
+            }
+        }
+    }, [serviceProviders.tts, murfVoices, selectedMurfVoice, selectedMurfLocale, getValues, setValue]);
 
     // Reset language when STT model changes if the provider has model-dependent language options
     const sttModel = watch("stt_model");
@@ -564,9 +599,9 @@ export default function ServiceConfiguration() {
             : schema;
 
         // Extract type from anyOf for nullable fields like Union[float, None]
-        const schemaData = actualSchema as any;
+        const schemaData = actualSchema as SchemaProperty;
         if (schemaData?.anyOf && Array.isArray(schemaData.anyOf)) {
-            const nonNullType = schemaData.anyOf.find((t: any) => t.type !== "null");
+            const nonNullType = schemaData.anyOf.find((t) => t.type !== "null");
             if (nonNullType) {
                 actualSchema = { ...actualSchema, ...nonNullType };
             }
@@ -582,6 +617,7 @@ export default function ServiceConfiguration() {
                     <VoiceSelector
                         provider={currentProvider}
                         value={watch(`${service}_${field}`) as string || ""}
+                        onVoicesLoaded={currentProvider === "murf" ? setMurfVoices : undefined}
                         onChange={(voiceId) => {
                             setValue(`${service}_${field}`, voiceId, { shouldDirty: true });
                         }}
@@ -726,6 +762,20 @@ export default function ServiceConfiguration() {
         // Handle fields with enum or examples (dropdown options)
         let dropdownOptions = actualSchema?.enum || actualSchema?.examples;
 
+        if (service === "tts" && serviceProviders.tts === "murf") {
+            const murfVoice = murfVoices.find((voice) => voice.voice_id === watch("tts_voice"));
+            if (field === "locale" && murfVoice?.supported_locales?.length) {
+                dropdownOptions = murfVoice.supported_locales;
+            }
+            if (field === "style") {
+                const locale = watch("tts_locale") as string | undefined;
+                const styles = murfVoice?.styles_by_locale?.[locale || ""] || [];
+                if (styles.length > 0) {
+                    dropdownOptions = styles;
+                }
+            }
+        }
+
         // Use model-dependent options when available (e.g., Sarvam voices per model)
         if (actualSchema?.model_options) {
             const modelValue = watch(`${service}_model`) as string;
@@ -790,7 +840,7 @@ export default function ServiceConfiguration() {
         }
 
         const isNumber = actualSchema?.type === "number" || actualSchema?.type === "integer";
-        const schemaAny = actualSchema as any;
+        const schemaAny = actualSchema as SchemaProperty;
         const isRange = isNumber && schemaAny?.minimum !== undefined && schemaAny?.maximum !== undefined;
 
         if (isRange) {

@@ -26,6 +26,7 @@ from api.plugins.sarvam import SarvamLLMService
 from api.plugins.deepinfra import DeepInfraLLMService
 from api.plugins.smallest_ai import SmallestAITTSService
 from api.plugins.voicemaker import VoicemakerTTSService
+from api.plugins.murf import MurfTTSService
 from api.plugins.cartesia.tts import create_cartesia_tts
 from api.plugins.cartesia.stt import create_cartesia_stt
 from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
@@ -407,6 +408,35 @@ def create_tts_service(user_config, audio_config: "AudioConfig"):
                 pro_engine=pro_engine if pro_engine else None,
                 accent_code=accent_code if accent_code else None,
             ),
+        )
+    elif user_config.tts.provider == ServiceProviders.MURF.value:
+        is_telephony = audio_config.transport_out_sample_rate <= 8000
+        if is_telephony:
+            sample_rate = int(
+                getattr(user_config.tts, "telephony_sample_rate", 8000) or 8000
+            )
+        else:
+            sample_rate = int(
+                getattr(user_config.tts, "web_sample_rate", 16000) or 16000
+            )
+        return MurfTTSService(
+            api_key=user_config.tts.api_key,
+            model=getattr(user_config.tts, "model", "FALCON") or "FALCON",
+            sample_rate=sample_rate,
+            params=MurfTTSService.InputParams(
+                voice=getattr(user_config.tts, "voice", "Matthew") or "Matthew",
+                locale=getattr(user_config.tts, "locale", "en-US") or "en-US",
+                style=getattr(user_config.tts, "style", "Conversation")
+                or "Conversation",
+                rate=int(getattr(user_config.tts, "rate", 0) or 0),
+                pitch=int(getattr(user_config.tts, "pitch", 0) or 0),
+                min_buffer_size=int(getattr(user_config.tts, "min_buffer_size", 40) or 40),
+                max_buffer_delay_in_ms=int(
+                    getattr(user_config.tts, "max_buffer_delay_in_ms", 300) or 300
+                ),
+                region=getattr(user_config.tts, "region", "us-east") or "us-east",
+            ),
+            text_filters=[xml_function_tag_filter],
         )
     else:
         raise HTTPException(
