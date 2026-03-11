@@ -516,16 +516,10 @@ def create_llm_service(user_config):
         # Use the correct InputParams class for Google to avoid propagating OpenAI-specific
         # NOT_GIVEN sentinels that break Pydantic validation in GoogleLLMService.
         temperature = getattr(user_config.llm, "temperature", 0.1) or 0.1
-        thinking_level = getattr(user_config.llm, "thinking_level", None)
-        
-        params = GoogleLLMService.InputParams(temperature=temperature)
-        if thinking_level:
-            params.thinking = GoogleLLMService.ThinkingConfig(thinking_level=thinking_level)
-
         return GoogleLLMService(
             api_key=user_config.llm.api_key,
             model=model,
-            params=params,
+            params=GoogleLLMService.InputParams(temperature=temperature),
         )
     elif user_config.llm.provider == ServiceProviders.AZURE.value:
         return AzureLLMService(
