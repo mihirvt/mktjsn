@@ -34,6 +34,7 @@ class UserConfigurationValidator:
             ServiceProviders.OPENAI.value: self._check_openai_api_key,
             ServiceProviders.FIREWORKS.value: self._check_fireworks_api_key,
             ServiceProviders.DEEPGRAM.value: self._check_deepgram_api_key,
+            ServiceProviders.FISH.value: self._check_fish_api_key,
             ServiceProviders.GROQ.value: self._check_groq_api_key,
             ServiceProviders.OPENROUTER.value: self._check_openrouter_api_key,
             ServiceProviders.ELEVENLABS.value: self._validate_elevenlabs_api_key,
@@ -194,6 +195,9 @@ class UserConfigurationValidator:
 
     def _validate_elevenlabs_api_key(self, model: str, api_key: str) -> bool:
         return True
+
+    def _check_fish_api_key(self, model: str, api_key: str) -> bool:
+        return bool(api_key and api_key.strip())
 
     def _check_google_api_key(self, model: str, api_key: str) -> bool:
         return True

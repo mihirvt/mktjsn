@@ -1,3 +1,4 @@
+import inspect
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Literal, Optional, TypedDict, Union
 
@@ -322,7 +323,17 @@ async def reactivate_api_key(
 
 
 # Voice Configuration Endpoints
-TTSProvider = Literal["elevenlabs", "deepgram", "sarvam", "cartesia", "dograh", "smallest_ai", "voicemaker", "murf"]
+TTSProvider = Literal[
+    "elevenlabs",
+    "deepgram",
+    "fish",
+    "sarvam",
+    "cartesia",
+    "dograh",
+    "smallest_ai",
+    "voicemaker",
+    "murf",
+]
 
 
 class VoiceInfo(BaseModel):
@@ -384,6 +395,68 @@ async def get_voices(
                 else:
                     logger.error(f"Failed to fetch Smallest.ai voices: {res.status_code} {res.text}")
                     return VoicesResponse(provider="smallest_ai", voices=[])
+
+        if provider == "fish":
+            user_config = await db_client.get_user_configurations(user.id)
+            api_key = None
+            if user_config.tts:
+                provider_val = (
+                    user_config.tts.provider.value
+                    if hasattr(user_config.tts.provider, "value")
+                    else user_config.tts.provider
+                )
+                if provider_val == "fish":
+                    api_key = getattr(user_config.tts, "api_key", None)
+
+            if not api_key:
+                return VoicesResponse(provider="fish", voices=[])
+
+            try:
+                from fishaudio import AsyncFishAudio
+            except ImportError:
+                logger.error(
+                    "Fish Audio SDK not installed. Please add fish-audio-sdk to use voice discovery."
+                )
+                return VoicesResponse(provider="fish", voices=[])
+
+            client = AsyncFishAudio(api_key=api_key)
+            try:
+                response = await client.voices.list()
+                voices = []
+                for voice in response.items:
+                    if getattr(voice, "type", None) != "tts":
+                        continue
+
+                    preview_url = None
+                    samples = getattr(voice, "samples", None) or []
+                    if samples:
+                        preview_url = getattr(samples[0], "audio", None)
+
+                    tags = list(getattr(voice, "tags", None) or [])
+                    gender = next(
+                        (tag for tag in tags if tag in {"male", "female", "neutral"}),
+                        None,
+                    )
+
+                    voices.append(
+                        VoiceInfo(
+                            voice_id=voice.id,
+                            name=getattr(voice, "title", voice.id),
+                            description=getattr(voice, "description", None),
+                            gender=gender,
+                            language=", ".join(getattr(voice, "languages", []) or []),
+                            preview_url=preview_url,
+                        )
+                    )
+                return VoicesResponse(provider="fish", voices=voices)
+            finally:
+                close_method = (
+                    getattr(client, "aclose", None) or getattr(client, "close", None)
+                )
+                if close_method:
+                    close_result = close_method()
+                    if inspect.isawaitable(close_result):
+                        await close_result
 
         if provider == "voicemaker":
             user_config = await db_client.get_user_configurations(user.id)

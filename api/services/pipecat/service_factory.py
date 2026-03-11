@@ -29,6 +29,7 @@ from api.plugins.voicemaker import VoicemakerTTSService
 from api.plugins.murf import MurfTTSService
 from api.plugins.cartesia.tts import create_cartesia_tts
 from api.plugins.cartesia.stt import create_cartesia_stt
+from api.plugins.fish_audio.tts import create_fish_tts
 from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
 from pipecat.services.sarvam.stt import SarvamSTTService
 from pipecat.transcriptions.language import Language
@@ -270,6 +271,14 @@ def create_tts_service(user_config, audio_config: "AudioConfig"):
             api_key=user_config.tts.api_key,
             voice=user_config.tts.voice,
             text_filters=[xml_function_tag_filter],
+        )
+    elif user_config.tts.provider == ServiceProviders.FISH.value:
+        service = create_fish_tts(user_config, audio_config)
+        if service:
+            return service
+        raise HTTPException(
+            status_code=500,
+            detail="Fish Audio dependencies are not installed on the server",
         )
     elif user_config.tts.provider == ServiceProviders.OPENAI.value:
         return OpenAITTSService(

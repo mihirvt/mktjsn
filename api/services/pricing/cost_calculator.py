@@ -177,6 +177,10 @@ class CostCalculator:
         if any(keyword in model_lower for keyword in ["eleven"]):
             return ServiceProviders.ELEVENLABS
 
+        # Fish Audio models
+        if model_lower in {"s1", "s2-pro"} or "fish" in model_lower:
+            return ServiceProviders.FISH
+
         # Deepgram models
         if any(
             keyword in model_lower
@@ -209,6 +213,10 @@ class CostCalculator:
         # Fireworks processors
         if any(keyword in processor_lower for keyword in ["fireworks"]):
             return ServiceProviders.FIREWORKS
+
+        # Fish processors
+        if "fish" in processor_lower:
+            return ServiceProviders.FISH
 
         # Deepgram processors
         if any(keyword in processor_lower for keyword in ["deepgram"]):

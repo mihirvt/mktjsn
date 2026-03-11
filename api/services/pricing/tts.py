@@ -22,6 +22,11 @@ TTS_PRICING: Dict[str, Dict[str, CharacterPricingModel]] = {
         "aura-1": CharacterPricingModel(Decimal("0.015") / 1_000),
         "default": CharacterPricingModel(Decimal("0.030") / 1_000),
     },
+    ServiceProviders.FISH: {
+        # Fish bills TTS by UTF-8 bytes; our estimator tracks characters, so this is approximate.
+        "s1": CharacterPricingModel(Decimal("15") / 1_000_000),
+        "default": CharacterPricingModel(Decimal("15") / 1_000_000),
+    },
     ServiceProviders.ELEVENLABS: {
         # 6400 usd per 250*1e6 characters
         "default": CharacterPricingModel(Decimal("0.0256") / 1_000)

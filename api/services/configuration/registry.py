@@ -15,6 +15,7 @@ class ServiceProviders(str, Enum):
     OPENAI = "openai"
     FIREWORKS = "fireworks"
     DEEPGRAM = "deepgram"
+    FISH = "fish"
     GROQ = "groq"
     OPENROUTER = "openrouter"
     CARTESIA = "cartesia"
@@ -37,6 +38,7 @@ class BaseServiceConfiguration(BaseModel):
         ServiceProviders.OPENAI,
         ServiceProviders.FIREWORKS,
         ServiceProviders.DEEPGRAM,
+        ServiceProviders.FISH,
         ServiceProviders.GROQ,
         ServiceProviders.OPENROUTER,
         ServiceProviders.ELEVENLABS,
@@ -322,6 +324,47 @@ class ElevenlabsTTSConfiguration(BaseServiceConfiguration):
     model: str = Field(
         default="eleven_flash_v2_5",
         json_schema_extra={"examples": ELEVENLABS_TTS_MODELS},
+    )
+    api_key: str
+
+
+FISH_TTS_MODELS = ["s1"]
+FISH_TTS_LATENCIES = ["balanced", "normal"]
+FISH_TTS_SAMPLE_RATES = [8000, 16000, 22050, 24000, 32000, 44100, 48000]
+
+
+@register_tts
+class FishTTSConfiguration(BaseTTSConfiguration):
+    provider: Literal[ServiceProviders.FISH] = ServiceProviders.FISH
+    model: str = Field(
+        default="s1",
+        json_schema_extra={"examples": FISH_TTS_MODELS},
+        description="Fish live WebSocket model header",
+    )
+    voice: str = Field(
+        default="bf322df2096a46f18c579d0baa36f41d",
+        description="Fish voice reference_id",
+    )
+    latency: str = Field(
+        default="balanced",
+        json_schema_extra={"examples": FISH_TTS_LATENCIES},
+        description="Balanced favors latency; normal favors quality",
+    )
+    speed: float = Field(default=1.0, ge=0.5, le=2.0)
+    volume: int = Field(default=0, ge=-20, le=20)
+    normalize: bool = Field(
+        default=True,
+        description="Text normalization before synthesis",
+    )
+    telephony_sample_rate: int = Field(
+        default=8000,
+        json_schema_extra={"examples": FISH_TTS_SAMPLE_RATES},
+        description="Requested sample rate for telephony calls",
+    )
+    web_sample_rate: int = Field(
+        default=16000,
+        json_schema_extra={"examples": FISH_TTS_SAMPLE_RATES},
+        description="Requested sample rate for web/WebRTC calls",
     )
     api_key: str
 
@@ -726,6 +769,7 @@ class MurfTTSConfiguration(BaseTTSConfiguration):
 TTSConfig = Annotated[
     Union[
         DeepgramTTSConfiguration,
+        FishTTSConfiguration,
         OpenAITTSService,
         ElevenlabsTTSConfiguration,
         CartesiaTTSConfiguration,

@@ -13,8 +13,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils";
 
 // Providers that have MPS voice endpoints
-type TTSProviderWithVoices = "elevenlabs" | "deepgram" | "sarvam" | "cartesia" | "dograh" | "smallest_ai" | "voicemaker" | "murf";
-const MPS_VOICE_PROVIDERS: TTSProviderWithVoices[] = ["elevenlabs", "deepgram", "sarvam", "cartesia", "dograh", "smallest_ai", "voicemaker", "murf"];
+type TTSProviderWithVoices = "elevenlabs" | "deepgram" | "fish" | "sarvam" | "cartesia" | "dograh" | "smallest_ai" | "voicemaker" | "murf";
+const MPS_VOICE_PROVIDERS: TTSProviderWithVoices[] = ["elevenlabs", "deepgram", "fish", "sarvam", "cartesia", "dograh", "smallest_ai", "voicemaker", "murf"];
 
 interface VoiceSelectorProps {
     provider: string;
@@ -51,6 +51,7 @@ export const VoiceSelector: React.FC<VoiceSelectorProps> = ({
         const providerMap: Record<string, TTSProviderWithVoices> = {
             elevenlabs: "elevenlabs",
             deepgram: "deepgram",
+            fish: "fish",
             sarvam: "sarvam",
             cartesia: "cartesia",
             dograh: "dograh",
