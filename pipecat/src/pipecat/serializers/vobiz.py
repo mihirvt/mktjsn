@@ -46,12 +46,14 @@ class VobizFrameSerializer(FrameSerializer):
         """Configuration parameters for VobizFrameSerializer.
 
         Parameters:
-            vobiz_sample_rate: Sample rate used by Vobiz, defaults to 8000 Hz.
+            vobiz_sample_rate: Sample rate used by Vobiz.
+            vobiz_content_type: Codec used by Vobiz WebSocket media.
             sample_rate: Optional override for pipeline input sample rate.
             auto_hang_up: Whether to automatically terminate call on EndFrame.
         """
 
-        vobiz_sample_rate: int = 8000
+        vobiz_sample_rate: int = 16000
+        vobiz_content_type: str = "audio/x-l16"
         sample_rate: Optional[int] = None
         auto_hang_up: bool = True
 
@@ -96,6 +98,7 @@ class VobizFrameSerializer(FrameSerializer):
         self._auth_token = auth_token
 
         self._vobiz_sample_rate = self._params.vobiz_sample_rate
+        self._vobiz_content_type = self._params.vobiz_content_type
         self._sample_rate = 0  # Pipeline input rate
 
         self._input_resampler = create_stream_resampler()
@@ -136,10 +139,7 @@ class VobizFrameSerializer(FrameSerializer):
         elif isinstance(frame, AudioRawFrame):
             data = frame.audio
 
-            # Output: Convert PCM at frame's rate to 8kHz μ-law for Vobiz
-            serialized_data = await pcm_to_ulaw(
-                data, frame.sample_rate, self._vobiz_sample_rate, self._output_resampler
-            )
+            serialized_data = await self._serialize_audio(data, frame.sample_rate)
             if serialized_data is None or len(serialized_data) == 0:
                 # Ignoring in case we don't have audio
                 return None
@@ -148,7 +148,7 @@ class VobizFrameSerializer(FrameSerializer):
             answer = {
                 "event": "playAudio",
                 "media": {
-                    "contentType": "audio/x-mulaw",
+                    "contentType": self._vobiz_content_type,
                     "sampleRate": self._vobiz_sample_rate,
                     "payload": payload,
                 },
@@ -239,10 +239,7 @@ class VobizFrameSerializer(FrameSerializer):
             payload_base64 = message["media"]["payload"]
             payload = base64.b64decode(payload_base64)
 
-            # Input: Convert Vobiz's 8kHz μ-law to PCM at pipeline input rate
-            deserialized_data = await ulaw_to_pcm(
-                payload, self._vobiz_sample_rate, self._sample_rate, self._input_resampler
-            )
+            deserialized_data = await self._deserialize_audio(payload)
             if deserialized_data is None or len(deserialized_data) == 0:
                 # Ignoring in case we don't have audio
                 return None
@@ -261,3 +258,40 @@ class VobizFrameSerializer(FrameSerializer):
                 return None
         else:
             return None
+
+    async def _serialize_audio(self, data: bytes, in_sample_rate: int) -> bytes | None:
+        if self._vobiz_content_type == "audio/x-mulaw":
+            return await pcm_to_ulaw(
+                data, in_sample_rate, self._vobiz_sample_rate, self._output_resampler
+            )
+
+        if self._vobiz_content_type == "audio/x-l16":
+            serialized = await self._output_resampler.resample(
+                data, in_sample_rate, self._vobiz_sample_rate
+            )
+            if len(serialized) % 2 == 1:
+                serialized = serialized[:-1]
+            return serialized
+
+        logger.warning(
+            f"Unsupported Vobiz output content type {self._vobiz_content_type}, dropping audio"
+        )
+        return None
+
+    async def _deserialize_audio(self, payload: bytes) -> bytes | None:
+        if self._vobiz_content_type == "audio/x-mulaw":
+            return await ulaw_to_pcm(
+                payload, self._vobiz_sample_rate, self._sample_rate, self._input_resampler
+            )
+
+        if self._vobiz_content_type == "audio/x-l16":
+            if len(payload) % 2 == 1:
+                payload = payload[:-1]
+            return await self._input_resampler.resample(
+                payload, self._vobiz_sample_rate, self._sample_rate
+            )
+
+        logger.warning(
+            f"Unsupported Vobiz input content type {self._vobiz_content_type}, dropping audio"
+        )
+        return None

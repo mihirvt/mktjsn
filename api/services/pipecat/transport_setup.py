@@ -255,15 +255,16 @@ async def create_vobiz_transport(
     workflow_run_id: int,
     audio_config: AudioConfig,
     organization_id: int,
+    media_content_type: str,
+    media_sample_rate: int,
     vad_config: dict | None = None,
     ambient_noise_config: dict | None = None,
 ):
     """Create a transport for Vobiz connections.
 
-    Vobiz uses Plivo-compatible WebSocket protocol:
-    - MULAW audio at 8kHz (same as Twilio)
-    - Base64-encoded audio in JSON messages
-    - PlivoFrameSerializer handles the protocol
+    Vobiz uses playAudio/media events with either:
+    - Linear PCM (audio/x-l16) at 8kHz or 16kHz
+    - μ-law (audio/x-mulaw) at 8kHz
     """
     from loguru import logger
 
@@ -300,14 +301,16 @@ async def create_vobiz_transport(
         auth_id=auth_id,
         auth_token=auth_token,
         params=VobizFrameSerializer.InputParams(
-            vobiz_sample_rate=8000,  # Vobiz uses MULAW at 8kHz
+            vobiz_sample_rate=media_sample_rate,
+            vobiz_content_type=media_content_type,
             sample_rate=audio_config.pipeline_sample_rate,
         ),
     )
 
     logger.debug(
         f"[run {workflow_run_id}] VobizFrameSerializer created for Vobiz - "
-        f"transport_rate=8000Hz, pipeline_rate={audio_config.pipeline_sample_rate}Hz"
+        f"transport_rate={media_sample_rate}Hz, content_type={media_content_type}, "
+        f"pipeline_rate={audio_config.pipeline_sample_rate}Hz"
     )
 
     # Create WebSocket transport (same structure as Twilio/Vonage)

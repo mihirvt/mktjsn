@@ -260,13 +260,13 @@ class VobizProvider(TelephonyProvider):
         Vobiz uses <Stream> element similar to Twilio but with Plivo-compatible attributes:
         - bidirectional: Enable two-way audio
         - audioTrack: Which audio to stream (inbound, outbound, both)
-        - contentType: audio/x-mulaw;rate=8000
+        - contentType: audio/x-l16;rate=16000
         """
         _, wss_backend_endpoint = await get_backend_endpoints()
 
         vobiz_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000">{wss_backend_endpoint}/api/v1/telephony/ws/{workflow_id}/{user_id}/{workflow_run_id}</Stream>
+    <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-l16;rate=16000">{wss_backend_endpoint}/api/v1/telephony/ws/{workflow_id}/{user_id}/{workflow_run_id}</Stream>
 </Response>"""
         return vobiz_xml
 
@@ -374,6 +374,17 @@ class VobizProvider(TelephonyProvider):
             start_data = start_msg.get("start", {})
             stream_id = start_data.get("streamId")
             call_id = start_data.get("callId")
+            media_format = start_data.get("mediaFormat", {})
+            media_content_type = (
+                media_format.get("encoding")
+                or start_msg.get("media", {}).get("contentType")
+                or "audio/x-mulaw"
+            )
+            media_sample_rate = int(
+                media_format.get("sampleRate")
+                or start_msg.get("media", {}).get("sampleRate")
+                or 8000
+            )
 
             if not stream_id or not call_id:
                 logger.error(f"Missing streamId or callId in start event: {start_data}")
@@ -382,11 +393,19 @@ class VobizProvider(TelephonyProvider):
 
             logger.info(
                 f"[run {workflow_run_id}] Starting Vobiz WebSocket handler - "
-                f"stream_id: {stream_id}, call_id: {call_id}"
+                f"stream_id: {stream_id}, call_id: {call_id}, "
+                f"content_type: {media_content_type}, sample_rate: {media_sample_rate}"
             )
 
             await run_pipeline_vobiz(
-                websocket, stream_id, call_id, workflow_id, workflow_run_id, user_id
+                websocket,
+                stream_id,
+                call_id,
+                media_content_type,
+                media_sample_rate,
+                workflow_id,
+                workflow_run_id,
+                user_id,
             )
 
             logger.info(f"[run {workflow_run_id}] Vobiz pipeline completed")
@@ -492,7 +511,7 @@ class VobizProvider(TelephonyProvider):
 
         vobiz_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000">{websocket_url}</Stream>
+    <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-l16;rate=16000">{websocket_url}</Stream>
 </Response>"""
 
         return Response(content=vobiz_xml, media_type="application/xml")

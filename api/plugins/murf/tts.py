@@ -24,6 +24,8 @@ from pipecat.frames.frames import (
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 
@@ -92,6 +94,8 @@ class MurfTTSService(TTSService):
         self._active_context_id: Optional[str] = None
         self._header_pending_contexts: set[str] = set()
         self._cleared_contexts: set[str] = set()
+        self._started_contexts: set[str] = set()
+        self._context_buffers: dict[str, bytearray] = {}
         self._context_finished = asyncio.Event()
         self._context_finished.set()
         self._advanced_settings_sent = False
@@ -118,8 +122,7 @@ class MurfTTSService(TTSService):
     async def run_tts(
         self, text: str, context_id: Optional[str] = None, **kwargs
     ) -> AsyncGenerator[Frame, None]:
-        if not text.strip():
-            yield None
+        if not self._has_speakable_content(text):
             return
 
         await self._connect()
@@ -133,11 +136,15 @@ class MurfTTSService(TTSService):
         self._active_context_id = turn_context_id
         self._header_pending_contexts.add(turn_context_id)
         self._cleared_contexts.discard(turn_context_id)
+        self._context_buffers[turn_context_id] = bytearray()
+        self._started_contexts.add(turn_context_id)
 
+        await self.start_ttfb_metrics()
+        await self.start_tts_usage_metrics(text)
+        yield TTSStartedFrame(context_id=turn_context_id)
         await self._send_advanced_settings()
         await self._send_voice_config(turn_context_id)
         await self._send_text(turn_context_id, text)
-        yield None
 
     async def _connect(self):
         if self._ws is not None and not self._ws.closed:
@@ -186,6 +193,8 @@ class MurfTTSService(TTSService):
         self._active_context_id = None
         self._header_pending_contexts.clear()
         self._cleared_contexts.clear()
+        self._started_contexts.clear()
+        self._context_buffers.clear()
         self._context_finished.set()
         self._advanced_settings_sent = False
 
@@ -228,10 +237,15 @@ class MurfTTSService(TTSService):
 
         self._cleared_contexts.add(context_id)
         self._header_pending_contexts.discard(context_id)
+        self._context_buffers.pop(context_id, None)
         payload = {"context_id": context_id, "clear": True}
         await self._send_json(payload)
         self._active_context_id = None
         self._context_finished.set()
+        if context_id in self._started_contexts:
+            self._started_contexts.discard(context_id)
+            await self.stop_ttfb_metrics()
+            await self.push_frame(TTSStoppedFrame(context_id=context_id))
 
     async def _send_json(self, payload: dict):
         await self._connect()
@@ -289,6 +303,11 @@ class MurfTTSService(TTSService):
             if not audio_bytes:
                 return
 
+            await self.stop_ttfb_metrics()
+            audio_bytes = self._buffer_aligned_audio(context_id, audio_bytes)
+            if not audio_bytes:
+                return
+
             frame_kwargs = {
                 "audio": audio_bytes,
                 "sample_rate": self._sample_rate,
@@ -308,13 +327,70 @@ class MurfTTSService(TTSService):
             return
 
         if data.get("final") is True:
+            final_audio = self._flush_context_buffer(context_id)
+            if final_audio:
+                frame_kwargs = {
+                    "audio": final_audio,
+                    "sample_rate": self._sample_rate,
+                    "num_channels": 1,
+                }
+                if context_id:
+                    frame_kwargs["context_id"] = context_id
+                try:
+                    frame = TTSAudioRawFrame(**frame_kwargs)
+                except TypeError:
+                    frame = TTSAudioRawFrame(
+                        audio=final_audio,
+                        sample_rate=self._sample_rate,
+                        num_channels=1,
+                    )
+                await self.push_frame(frame)
+
             if context_id:
                 self._header_pending_contexts.discard(context_id)
                 self._cleared_contexts.discard(context_id)
+                if context_id in self._started_contexts:
+                    self._started_contexts.discard(context_id)
+                    await self.push_frame(TTSStoppedFrame(context_id=context_id))
                 if context_id == self._active_context_id:
                     self._active_context_id = None
                     self._context_finished.set()
             else:
                 self._active_context_id = None
                 self._context_finished.set()
+                await self.push_frame(TTSStoppedFrame())
             logger.debug(f"Murf TTS final received for context {context_id}")
+
+    @staticmethod
+    def _has_speakable_content(text: str) -> bool:
+        stripped = text.strip()
+        if not stripped:
+            return False
+        return any(char.isalnum() for char in stripped)
+
+    def _buffer_aligned_audio(self, context_id: Optional[str], audio_bytes: bytes) -> bytes:
+        if not context_id:
+            aligned_length = len(audio_bytes) & ~1
+            return audio_bytes[:aligned_length]
+
+        buffer = self._context_buffers.setdefault(context_id, bytearray())
+        buffer.extend(audio_bytes)
+        aligned_length = len(buffer) & ~1
+        if aligned_length <= 0:
+            return b""
+
+        aligned = bytes(buffer[:aligned_length])
+        del buffer[:aligned_length]
+        return aligned
+
+    def _flush_context_buffer(self, context_id: Optional[str]) -> bytes:
+        if not context_id:
+            return b""
+
+        buffer = self._context_buffers.pop(context_id, None)
+        if not buffer:
+            return b""
+
+        if len(buffer) % 2 == 1:
+            buffer.extend(b"\x00")
+        return bytes(buffer)

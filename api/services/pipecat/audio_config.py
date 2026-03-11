@@ -31,6 +31,7 @@ class AudioConfig:
 
     transport_in_sample_rate: int
     transport_out_sample_rate: int
+    transport_type: Optional[str] = None
     vad_sample_rate: int = 16000  # VAD typically resamples internally
     pipeline_sample_rate: Optional[int] = None  # If None, uses transport rates
     buffer_size_seconds: float = 5.0  # This is how frequenly we will call merge_auido
@@ -102,6 +103,7 @@ def create_audio_config(transport_type: str) -> AudioConfig:
         return AudioConfig(
             transport_in_sample_rate=8000,
             transport_out_sample_rate=8000,
+            transport_type=transport_type,
             vad_sample_rate=8000,  # Use matching VAD rate
             pipeline_sample_rate=8000,  # Keep at 8kHz to avoid resampling
             buffer_size_seconds=5.0,
@@ -111,6 +113,7 @@ def create_audio_config(transport_type: str) -> AudioConfig:
         return AudioConfig(
             transport_in_sample_rate=16000,
             transport_out_sample_rate=16000,
+            transport_type=transport_type,
             vad_sample_rate=16000,  # Use matching VAD rate
             pipeline_sample_rate=16000,  # Keep at 16kHz to avoid resampling
             buffer_size_seconds=5.0,
@@ -124,6 +127,7 @@ def create_audio_config(transport_type: str) -> AudioConfig:
         return AudioConfig(
             transport_in_sample_rate=16000,  # Transport will resample from 24kHz
             transport_out_sample_rate=16000,  # Transport will resample to 24kHz
+            transport_type=transport_type,
             vad_sample_rate=16000,  # VAD native rate
             pipeline_sample_rate=16000,  # Keep pipeline at 16kHz
             buffer_size_seconds=5.0,
@@ -136,7 +140,33 @@ def create_audio_config(transport_type: str) -> AudioConfig:
         return AudioConfig(
             transport_in_sample_rate=16000,
             transport_out_sample_rate=16000,
+            transport_type=transport_type,
             vad_sample_rate=16000,
             pipeline_sample_rate=16000,
             buffer_size_seconds=5.0,
         )
+
+
+def create_vobiz_audio_config(content_type: str, sample_rate: int) -> AudioConfig:
+    """Create Vobiz audio configuration based on the negotiated stream format."""
+    normalized_type = (content_type or "").lower()
+    negotiated_rate = 16000 if int(sample_rate or 16000) >= 16000 else 8000
+
+    if normalized_type == "audio/x-l16":
+        return AudioConfig(
+            transport_in_sample_rate=negotiated_rate,
+            transport_out_sample_rate=negotiated_rate,
+            transport_type=WorkflowRunMode.VOBIZ.value,
+            vad_sample_rate=16000 if negotiated_rate >= 16000 else 8000,
+            pipeline_sample_rate=16000 if negotiated_rate >= 16000 else 8000,
+            buffer_size_seconds=5.0,
+        )
+
+    return AudioConfig(
+        transport_in_sample_rate=8000,
+        transport_out_sample_rate=8000,
+        transport_type=WorkflowRunMode.VOBIZ.value,
+        vad_sample_rate=8000,
+        pipeline_sample_rate=8000,
+        buffer_size_seconds=5.0,
+    )

@@ -410,15 +410,32 @@ def create_tts_service(user_config, audio_config: "AudioConfig"):
             ),
         )
     elif user_config.tts.provider == ServiceProviders.MURF.value:
-        is_telephony = audio_config.transport_out_sample_rate <= 8000
+        is_telephony = getattr(audio_config, "transport_type", None) in {
+            "twilio",
+            "vonage",
+            "vobiz",
+            "cloudonix",
+            "ari",
+        } or audio_config.transport_out_sample_rate <= 8000
         if is_telephony:
             sample_rate = int(
-                getattr(user_config.tts, "telephony_sample_rate", 8000) or 8000
+                getattr(
+                    user_config.tts,
+                    "telephony_sample_rate",
+                    audio_config.transport_out_sample_rate,
+                )
+                or audio_config.transport_out_sample_rate
             )
         else:
             sample_rate = int(
-                getattr(user_config.tts, "web_sample_rate", 16000) or 16000
+                getattr(
+                    user_config.tts,
+                    "web_sample_rate",
+                    audio_config.transport_out_sample_rate,
+                )
+                or audio_config.transport_out_sample_rate
             )
+        sample_rate = min(sample_rate, audio_config.transport_out_sample_rate)
         return MurfTTSService(
             api_key=user_config.tts.api_key,
             model=getattr(user_config.tts, "model", "FALCON") or "FALCON",

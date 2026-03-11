@@ -8,7 +8,11 @@ from api.db import db_client
 from api.db.models import WorkflowModel
 from api.enums import WorkflowRunMode
 from api.services.configuration.registry import ServiceProviders
-from api.services.pipecat.audio_config import AudioConfig, create_audio_config
+from api.services.pipecat.audio_config import (
+    AudioConfig,
+    create_audio_config,
+    create_vobiz_audio_config,
+)
 from api.services.pipecat.event_handlers import (
     register_audio_data_handler,
     register_event_handlers,
@@ -259,6 +263,8 @@ async def run_pipeline_vobiz(
     websocket_client: WebSocket,
     stream_id: str,
     call_id: str,
+    media_content_type: str,
+    media_sample_rate: int,
     workflow_id: int,
     workflow_run_id: int,
     user_id: int,
@@ -285,10 +291,11 @@ async def run_pipeline_vobiz(
             ]
 
     try:
-        audio_config = create_audio_config(WorkflowRunMode.VOBIZ.value)
+        audio_config = create_vobiz_audio_config(media_content_type, media_sample_rate)
         logger.info(
             f"[run {workflow_run_id}] Vobiz audio config: "
-            f"sample_rate={audio_config.transport_in_sample_rate}Hz, format=MULAW"
+            f"sample_rate={audio_config.transport_in_sample_rate}Hz, "
+            f"format={media_content_type}"
         )
 
         transport = await create_vobiz_transport(
@@ -298,6 +305,8 @@ async def run_pipeline_vobiz(
             workflow_run_id,
             audio_config,
             workflow.organization_id,
+            media_content_type,
+            media_sample_rate,
             vad_config,
             ambient_noise_config,
         )

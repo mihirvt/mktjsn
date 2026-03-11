@@ -11,7 +11,7 @@ from api.services.configuration.registry import ServiceProviders
 from api.services.pipecat.audio_config import AudioConfig
 from api.services.pipecat.service_factory import create_tts_service
 from api.services.pricing.tts import TTS_PRICING
-from pipecat.frames.frames import TTSAudioRawFrame
+from pipecat.frames.frames import TTSAudioRawFrame, TTSStartedFrame, TTSStoppedFrame
 
 
 @pytest.mark.asyncio
@@ -47,10 +47,13 @@ async def test_murf_audio_chunks_strip_wav_header_once():
     )
     await service._handle_text_message(json.dumps({"context_id": "ctx-1", "final": True}))
 
-    assert len(pushed_frames) == 2
-    assert all(isinstance(frame, TTSAudioRawFrame) for frame in pushed_frames)
-    assert pushed_frames[0].audio == pcm_payload
-    assert pushed_frames[1].audio == pcm_payload
+    audio_frames = [frame for frame in pushed_frames if isinstance(frame, TTSAudioRawFrame)]
+    stop_frames = [frame for frame in pushed_frames if isinstance(frame, TTSStoppedFrame)]
+
+    assert len(audio_frames) == 2
+    assert audio_frames[0].audio == pcm_payload
+    assert audio_frames[1].audio == pcm_payload
+    assert len(stop_frames) == 1
     assert service._context_finished.is_set()
 
 
@@ -79,7 +82,8 @@ async def test_murf_drops_stale_audio_after_clear():
         )
     )
 
-    assert pushed_frames == []
+    assert len(pushed_frames) == 1
+    assert isinstance(pushed_frames[0], TTSStoppedFrame)
     assert service._context_finished.is_set()
 
 
@@ -105,11 +109,13 @@ async def test_murf_sends_advanced_settings_once_per_connection():
     service._connect = _noop_connect  # type: ignore[method-assign]
     service._ws = SimpleNamespace(closed=False)
 
-    async for _ in service.run_tts("Hello there.", context_id="ctx-1"):
-        pass
+    yielded_first = []
+    async for frame in service.run_tts("Hello there.", context_id="ctx-1"):
+        yielded_first.append(frame)
     service._context_finished.set()
-    async for _ in service.run_tts("Second turn.", context_id="ctx-2"):
-        pass
+    yielded_second = []
+    async for frame in service.run_tts("Second turn.", context_id="ctx-2"):
+        yielded_second.append(frame)
 
     assert sent_payloads[0] == {
         "min_buffer_size": 60,
@@ -119,6 +125,70 @@ async def test_murf_sends_advanced_settings_once_per_connection():
     assert sent_payloads[2]["context_id"] == "ctx-1"
     assert sent_payloads[3]["context_id"] == "ctx-2"
     assert sent_payloads[4]["context_id"] == "ctx-2"
+    assert isinstance(yielded_first[0], TTSStartedFrame)
+    assert isinstance(yielded_second[0], TTSStartedFrame)
+
+
+@pytest.mark.asyncio
+async def test_murf_audio_chunks_are_aligned_per_context():
+    service = MurfTTSService(api_key="test-key", sample_rate=16000)
+    pushed_frames = []
+
+    async def _capture(frame, *args, **kwargs):
+        pushed_frames.append(frame)
+
+    service.push_frame = _capture  # type: ignore[method-assign]
+    service._active_context_id = "ctx-align"
+    service._context_finished.clear()
+    service._started_contexts.add("ctx-align")
+    service._context_buffers["ctx-align"] = bytearray()
+
+    await service._handle_text_message(
+        json.dumps(
+            {
+                "context_id": "ctx-align",
+                "audio": base64.b64encode(b"\x01\x02\x03").decode("utf-8"),
+            }
+        )
+    )
+    await service._handle_text_message(
+        json.dumps(
+            {
+                "context_id": "ctx-align",
+                "audio": base64.b64encode(b"\x04\x05").decode("utf-8"),
+            }
+        )
+    )
+    await service._handle_text_message(json.dumps({"context_id": "ctx-align", "final": True}))
+
+    audio_frames = [frame for frame in pushed_frames if isinstance(frame, TTSAudioRawFrame)]
+    stop_frames = [frame for frame in pushed_frames if isinstance(frame, TTSStoppedFrame)]
+
+    assert [frame.audio for frame in audio_frames] == [b"\x01\x02", b"\x03\x04", b"\x05\x00"]
+    assert len(stop_frames) == 1
+
+
+@pytest.mark.asyncio
+async def test_murf_skips_punctuation_only_text():
+    service = MurfTTSService(api_key="test-key", sample_rate=16000)
+    sent_payloads = []
+
+    async def _capture_send(payload):
+        sent_payloads.append(payload)
+
+    async def _noop_connect():
+        return None
+
+    service._send_json = _capture_send  # type: ignore[method-assign]
+    service._connect = _noop_connect  # type: ignore[method-assign]
+    service._ws = SimpleNamespace(closed=False)
+
+    yielded = []
+    async for frame in service.run_tts("...", context_id="ctx-dot"):
+        yielded.append(frame)
+
+    assert yielded == []
+    assert sent_payloads == []
 
 
 def test_create_tts_service_returns_murf_and_transport_aware_sample_rate():
