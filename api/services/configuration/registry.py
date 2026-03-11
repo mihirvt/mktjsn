@@ -328,7 +328,7 @@ class ElevenlabsTTSConfiguration(BaseServiceConfiguration):
     api_key: str
 
 
-FISH_TTS_MODELS = ["s1"]
+FISH_TTS_MODELS = ["s2-pro", "s1"]
 FISH_TTS_LATENCIES = ["balanced", "normal"]
 FISH_TTS_SAMPLE_RATES = [8000, 16000, 22050, 24000, 32000, 44100, 48000]
 
@@ -337,7 +337,7 @@ FISH_TTS_SAMPLE_RATES = [8000, 16000, 22050, 24000, 32000, 44100, 48000]
 class FishTTSConfiguration(BaseTTSConfiguration):
     provider: Literal[ServiceProviders.FISH] = ServiceProviders.FISH
     model: str = Field(
-        default="s1",
+        default="s2-pro",
         json_schema_extra={"examples": FISH_TTS_MODELS},
         description="Fish live WebSocket model header",
     )
@@ -350,6 +350,9 @@ class FishTTSConfiguration(BaseTTSConfiguration):
         json_schema_extra={"examples": FISH_TTS_LATENCIES},
         description="Balanced favors latency; normal favors quality",
     )
+    top_p: float = Field(default=0.7, ge=0.0, le=1.0)
+    temperature: float = Field(default=0.7, ge=0.0, le=1.0)
+    chunk_length: int = Field(default=200, ge=100, le=300)
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
     volume: int = Field(default=0, ge=-20, le=20)
     normalize: bool = Field(
@@ -359,12 +362,12 @@ class FishTTSConfiguration(BaseTTSConfiguration):
     telephony_sample_rate: int = Field(
         default=8000,
         json_schema_extra={"examples": FISH_TTS_SAMPLE_RATES},
-        description="Requested sample rate for telephony calls",
+        description="Preferred telephony sample rate; runtime output is clamped to the active transport format",
     )
     web_sample_rate: int = Field(
         default=16000,
         json_schema_extra={"examples": FISH_TTS_SAMPLE_RATES},
-        description="Requested sample rate for web/WebRTC calls",
+        description="Preferred web/WebRTC sample rate; runtime output is clamped to the active transport format",
     )
     api_key: str
 

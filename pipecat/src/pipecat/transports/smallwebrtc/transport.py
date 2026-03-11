@@ -433,6 +433,21 @@ class SmallWebRTCClient:
         Returns:
             True if the audio frame was written successfully, False otherwise.
         """
+        if not self._can_send() or not self._audio_output_track:
+            # Early pipeline audio can arrive while the peer connection is still
+            # negotiating. Wait briefly instead of treating "not connected yet"
+            # as a hard transport write failure.
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                if self._can_send() and self._audio_output_track:
+                    break
+                if self.is_closing:
+                    return False
+                pc_state = self._webrtc_connection.pc.connectionState
+                if pc_state in {"closed", "failed"}:
+                    return False
+                await asyncio.sleep(0.02)
+
         if self._can_send() and self._audio_output_track:
             await self._audio_output_track.add_audio_bytes(frame.audio)
             return True
