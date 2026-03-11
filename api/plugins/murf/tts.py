@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
     from pipecat.services.tts_service import TTSService
@@ -119,6 +120,7 @@ class MurfTTSService(TTSService):
             return
         await super().process_frame(frame, direction)
 
+    @traced_tts
     async def run_tts(
         self, text: str, context_id: Optional[str] = None, **kwargs
     ) -> AsyncGenerator[Frame, None]:

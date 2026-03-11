@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.utils.tracing.service_decorators import traced_tts
 try:
     from pipecat.services.tts_service import TTSService
 except ImportError:
@@ -130,6 +131,7 @@ class SmallestAITTSService(TTSService):
         else:
             await super().process_frame(frame, direction)
 
+    @traced_tts
     async def run_tts(self, text: str, context_id: Optional[str] = None, **kwargs) -> AsyncGenerator[Frame, None]:
         """Send text to the TTS service."""
         # This is where Pipecat hands us completed sentences from aggregate TextFrames

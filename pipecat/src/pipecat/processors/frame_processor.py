@@ -52,6 +52,14 @@ from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FrameP
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
+from pipecat.utils.tracing.context_registry import (
+    get_current_conversation_context,
+    get_current_turn_context,
+)
+from pipecat.utils.tracing.setup import is_tracing_available
+
+if is_tracing_available():
+    from opentelemetry import trace
 
 INTERRUPTION_COMPLETION_TIMEOUT = 2.0
 
@@ -704,8 +712,40 @@ class FrameProcessor(BaseObject):
                 await self.push_error("Critical operation failed", exception=e, fatal=True)
             ```
         """
+        self._trace_error(error_msg=error_msg, exception=exception, fatal=fatal)
         error_frame = ErrorFrame(error=error_msg, fatal=fatal, exception=exception, processor=self)
         await self.push_error_frame(error=error_frame)
+
+    def _trace_error(
+        self,
+        *,
+        error_msg: str,
+        exception: Optional[Exception] = None,
+        fatal: bool = False,
+    ) -> None:
+        if not is_tracing_available():
+            return
+
+        parent_context = get_current_turn_context() or get_current_conversation_context()
+        if parent_context is None:
+            return
+
+        try:
+            tracer = trace.get_tracer("pipecat")
+            with tracer.start_as_current_span("error", context=parent_context) as span:
+                span.set_attribute("langfuse.trace.public", True)
+                span.set_attribute("error.processor_name", self.name)
+                span.set_attribute("error.processor_type", self.__class__.__name__)
+                span.set_attribute("error.message", error_msg)
+                span.set_attribute("error.fatal", fatal)
+                if exception:
+                    span.set_attribute("error.exception_type", exception.__class__.__name__)
+                    span.record_exception(exception)
+                    span.set_status(trace.Status(trace.StatusCode.ERROR, str(exception)))
+                else:
+                    span.set_status(trace.Status(trace.StatusCode.ERROR, error_msg))
+        except Exception as e:
+            logger.debug(f"{self} failed to trace error span: {e}")
 
     async def push_error_frame(self, error: ErrorFrame):
         """Push an error frame upstream.

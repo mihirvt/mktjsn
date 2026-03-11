@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.tts_cache import CachedTTSData, TTSCacheManager
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
     from websockets.protocol import State
@@ -246,6 +247,7 @@ class ElevenLabsCachedTTSService(ElevenLabsTTSService):
             max_time = max(t for _, t in cached_data.word_timestamps)
             self._cumulative_time += max_time
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text, checking cache first.
 

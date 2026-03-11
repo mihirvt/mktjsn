@@ -62,6 +62,14 @@ from pipecat.turns.user_turn_completion_mixin import UserTurnCompletionLLMServic
 from pipecat.utils.context.llm_context_summarization import (
     LLMContextSummarizationUtil,
 )
+from pipecat.utils.tracing.context_registry import (
+    get_current_conversation_context,
+    get_current_turn_context,
+)
+from pipecat.utils.tracing.setup import is_tracing_available
+
+if is_tracing_available():
+    from opentelemetry import trace
 
 # Type alias for a callable that handles LLM function calls.
 FunctionCallHandler = Callable[["FunctionCallParams"], Awaitable[None]]
@@ -641,8 +649,14 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             elif None in self._functions.keys():
                 item = self._functions[None]
             else:
-                logger.warning(
-                    f"{self} is calling '{function_call.function_name}', but it's not registered."
+                message = f"{self} is calling '{function_call.function_name}', but it's not registered."
+                logger.warning(message)
+                self._trace_function_call_span(
+                    function_name=function_call.function_name,
+                    tool_call_id=function_call.tool_call_id,
+                    arguments=function_call.arguments,
+                    status="missing",
+                    error_message=message,
                 )
                 continue
 
@@ -770,21 +784,20 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         )
 
         # NOTE(aleix): This needs to be removed after we remove the deprecation.
-        await self._call_start_function(runner_item.context, runner_item.function_name)
-
-        # Broadcast function call in-progress. This frame will let our assistant
-        # context aggregator know that we are in the middle of a function
-        # call. Some contexts/aggregators may not need this. But some definitely
-        # do (Anthropic, for example).
-        await self.broadcast_frame(
-            FunctionCallInProgressFrame,
+        span_ctx = self._start_function_call_span(
             function_name=runner_item.function_name,
             tool_call_id=runner_item.tool_call_id,
             arguments=runner_item.arguments,
-            cancel_on_interruption=item.cancel_on_interruption,
         )
+        current_span = span_ctx.__enter__() if span_ctx else None
+        if current_span is not None:
+            current_span.set_attribute("langfuse.trace.public", True)
+            current_span.set_attribute("tool.name", runner_item.function_name)
+            current_span.set_attribute("tool.call_id", runner_item.tool_call_id)
+            current_span.set_attribute("tool.arguments", str(dict(runner_item.arguments)))
 
         timeout_task: Optional[asyncio.Task] = None
+        timed_out = False
 
         # Define a callback function that pushes a FunctionCallResultFrame upstream & downstream.
         async def function_call_result_callback(
@@ -805,14 +818,23 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
                 run_llm=runner_item.run_llm,
                 properties=properties,
             )
+            if current_span is not None:
+                current_span.set_attribute("tool.result.is_null", result is None)
 
         # Start a timeout task for deferred function calls
         async def timeout_handler():
+            nonlocal timed_out
             try:
                 await asyncio.sleep(self._function_call_timeout_secs)
-                logger.warning(
-                    f"{self} Function call [{runner_item.function_name}:{runner_item.tool_call_id}] timed out after {self._function_call_timeout_secs} seconds"
+                timed_out = True
+                message = (
+                    f"{self} Function call [{runner_item.function_name}:{runner_item.tool_call_id}] "
+                    f"timed out after {self._function_call_timeout_secs} seconds"
                 )
+                logger.warning(message)
+                if current_span is not None:
+                    current_span.set_attribute("tool.timeout_seconds", self._function_call_timeout_secs)
+                    current_span.set_status(trace.Status(trace.StatusCode.ERROR, message))
                 await function_call_result_callback(None)
             except asyncio.CancelledError:
                 raise
@@ -821,6 +843,20 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
             timeout_task = self.create_task(timeout_handler())
 
         try:
+            await self._call_start_function(runner_item.context, runner_item.function_name)
+
+            # Broadcast function call in-progress. This frame will let our assistant
+            # context aggregator know that we are in the middle of a function
+            # call. Some contexts/aggregators may not need this. But some definitely
+            # do (Anthropic, for example).
+            await self.broadcast_frame(
+                FunctionCallInProgressFrame,
+                function_name=runner_item.function_name,
+                tool_call_id=runner_item.tool_call_id,
+                arguments=runner_item.arguments,
+                cancel_on_interruption=item.cancel_on_interruption,
+            )
+
             # Yield to the event loop so the timeout task coroutine gets entered
             # before it could be cancelled. Without this, cancelling the task before
             # it starts would leave the coroutine in a "never awaited" state.
@@ -862,10 +898,74 @@ class LLMService(UserTurnCompletionLLMServiceMixin, AIService):
         except Exception as e:
             error_message = f"Error executing function call [{runner_item.function_name}]: {e}"
             logger.error(f"{self} {error_message}")
+            if current_span is not None:
+                current_span.record_exception(e)
+                current_span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
             await self.push_error(error_msg=error_message, exception=e, fatal=False)
         finally:
             if timeout_task and not timeout_task.done():
                 await self.cancel_task(timeout_task)
+            if current_span is not None and not timed_out and current_span.is_recording():
+                if current_span.status.status_code is trace.StatusCode.UNSET:
+                    current_span.set_status(trace.Status(trace.StatusCode.OK))
+            if span_ctx:
+                span_ctx.__exit__(None, None, None)
+
+    def _start_function_call_span(
+        self,
+        *,
+        function_name: str,
+        tool_call_id: str,
+        arguments: Mapping[str, Any],
+    ):
+        if not is_tracing_available():
+            return None
+
+        parent_context = get_current_turn_context() or get_current_conversation_context()
+        if parent_context is None:
+            return None
+
+        try:
+            tracer = trace.get_tracer("pipecat")
+            span_ctx = tracer.start_as_current_span("tool_call", context=parent_context)
+            return span_ctx
+        except Exception as e:
+            logger.debug(f"{self} failed to start tool call span: {e}")
+            return None
+
+    def _trace_function_call_span(
+        self,
+        *,
+        function_name: str,
+        tool_call_id: str,
+        arguments: Mapping[str, Any],
+        status: str,
+        error_message: Optional[str] = None,
+    ) -> None:
+        span_ctx = self._start_function_call_span(
+            function_name=function_name,
+            tool_call_id=tool_call_id,
+            arguments=arguments,
+        )
+        if span_ctx is None:
+            return
+
+        try:
+            span = span_ctx.__enter__()
+            span.set_attribute("langfuse.trace.public", True)
+            span.set_attribute("tool.name", function_name)
+            span.set_attribute("tool.call_id", tool_call_id)
+            span.set_attribute("tool.arguments", str(dict(arguments)))
+            span.set_attribute("tool.status", status)
+            if error_message:
+                span.set_attribute("error.message", error_message)
+                span.set_status(trace.Status(trace.StatusCode.ERROR, error_message))
+            else:
+                span.set_status(trace.Status(trace.StatusCode.OK))
+        except Exception as e:
+            logger.debug(f"{self} failed to record tool call span: {e}")
+        finally:
+            span_ctx.__exit__(None, None, None)
 
     async def _cancel_function_call(self, function_name: Optional[str]):
         cancelled_tasks = set()
