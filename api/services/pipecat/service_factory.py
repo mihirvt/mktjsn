@@ -27,6 +27,7 @@ from api.plugins.deepinfra import DeepInfraLLMService
 from api.plugins.smallest_ai import SmallestAITTSService
 from api.plugins.voicemaker import VoicemakerTTSService
 from api.plugins.murf import MurfTTSService
+from api.plugins.grok_tts import GrokTTSService
 from api.plugins.cartesia.tts import create_cartesia_tts
 from api.plugins.cartesia.stt import create_cartesia_stt
 from api.plugins.fish_audio.tts import create_fish_tts
@@ -461,6 +462,49 @@ def create_tts_service(user_config, audio_config: "AudioConfig"):
                     getattr(user_config.tts, "max_buffer_delay_in_ms", 300) or 300
                 ),
                 region=getattr(user_config.tts, "region", "us-east") or "us-east",
+            ),
+            text_filters=[xml_function_tag_filter],
+        )
+    elif user_config.tts.provider == ServiceProviders.GROK.value:
+        is_telephony = getattr(audio_config, "transport_type", None) in {
+            "twilio",
+            "vonage",
+            "vobiz",
+            "cloudonix",
+            "ari",
+        } or audio_config.transport_out_sample_rate <= 8000
+        if is_telephony:
+            sample_rate = int(
+                getattr(
+                    user_config.tts,
+                    "telephony_sample_rate",
+                    audio_config.transport_out_sample_rate,
+                )
+                or audio_config.transport_out_sample_rate
+            )
+            # Cap telephony at 16 kHz
+            sample_rate = min(sample_rate, 16000)
+        else:
+            sample_rate = int(
+                getattr(
+                    user_config.tts,
+                    "web_sample_rate",
+                    audio_config.transport_out_sample_rate,
+                )
+                or audio_config.transport_out_sample_rate
+            )
+        sample_rate = min(sample_rate, audio_config.transport_out_sample_rate)
+        voice = getattr(user_config.tts, "voice", "eve") or "eve"
+        language = getattr(user_config.tts, "language", "en") or "en"
+        codec = getattr(user_config.tts, "codec", "pcm") or "pcm"
+        return GrokTTSService(
+            api_key=user_config.tts.api_key,
+            voice=voice,
+            codec=codec,
+            sample_rate=sample_rate,
+            language=language,
+            params=GrokTTSService.InputParams(
+                language=language,
             ),
             text_filters=[xml_function_tag_filter],
         )

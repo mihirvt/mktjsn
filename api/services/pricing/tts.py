@@ -35,5 +35,9 @@ TTS_PRICING: Dict[str, Dict[str, CharacterPricingModel]] = {
         "FALCON": CharacterPricingModel(Decimal("0.01") / 1_000),
         "default": CharacterPricingModel(Decimal("0.01") / 1_000),
     },
+    ServiceProviders.GROK: {
+        "grok-tts": CharacterPricingModel(Decimal("0.005") / 1_000),
+        "default": CharacterPricingModel(Decimal("0.005") / 1_000),
+    },
     "default": {"default": CharacterPricingModel(Decimal("0.030") / 1_000)},
 }

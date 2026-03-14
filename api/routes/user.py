@@ -333,6 +333,7 @@ TTSProvider = Literal[
     "smallest_ai",
     "voicemaker",
     "murf",
+    "grok",
 ]
 
 
@@ -561,6 +562,42 @@ async def get_voices(
 
             logger.error(f"Failed to fetch Murf voices: {res.status_code} {res.text[:300]}")
             return VoicesResponse(provider="murf", voices=[])
+
+        if provider == "grok":
+            # xAI Grok has 5 static voices — no API call needed
+            grok_voices = [
+                VoiceInfo(
+                    voice_id="eve",
+                    name="Eve",
+                    description="Warm, conversational female voice",
+                    gender="female",
+                ),
+                VoiceInfo(
+                    voice_id="ara",
+                    name="Ara",
+                    description="Clear, professional female voice",
+                    gender="female",
+                ),
+                VoiceInfo(
+                    voice_id="rex",
+                    name="Rex",
+                    description="Deep, authoritative male voice",
+                    gender="male",
+                ),
+                VoiceInfo(
+                    voice_id="sal",
+                    name="Sal",
+                    description="Friendly, approachable male voice",
+                    gender="male",
+                ),
+                VoiceInfo(
+                    voice_id="leo",
+                    name="Leo",
+                    description="Energetic, expressive male voice",
+                    gender="male",
+                ),
+            ]
+            return VoicesResponse(provider="grok", voices=grok_voices)
 
         result = await mps_service_key_client.get_voices(
             provider=provider,

@@ -31,6 +31,7 @@ class ServiceProviders(str, Enum):
     SONIOX = "soniox"
     VOICEMAKER = "voicemaker"
     MURF = "murf"
+    GROK = "grok"
 
 
 class BaseServiceConfiguration(BaseModel):
@@ -46,6 +47,7 @@ class BaseServiceConfiguration(BaseModel):
         ServiceProviders.AZURE,
         ServiceProviders.DOGRAH,
         ServiceProviders.DEEPINFRA,
+        ServiceProviders.GROK,
         # ServiceProviders.SARVAM,
     ]
     api_key: str
@@ -769,6 +771,51 @@ class MurfTTSConfiguration(BaseTTSConfiguration):
     api_key: str
 
 
+GROK_TTS_VOICES = ["eve", "ara", "rex", "sal", "leo"]
+GROK_TTS_CODECS = ["pcm", "mulaw", "alaw", "wav", "mp3"]
+GROK_TTS_LANGUAGES = [
+    "en", "zh", "pt-BR", "auto",
+]
+GROK_TELEPHONY_SAMPLE_RATES = [8000, 16000]
+GROK_WEB_SAMPLE_RATES = [16000, 22050, 24000, 44100, 48000]
+
+
+@register_tts
+class GrokTTSConfiguration(BaseTTSConfiguration):
+    provider: Literal[ServiceProviders.GROK] = ServiceProviders.GROK
+    model: str = Field(
+        default="grok-tts",
+        json_schema_extra={"examples": ["grok-tts"]},
+        description="xAI Grok TTS model identifier",
+    )
+    voice: str = Field(
+        default="eve",
+        json_schema_extra={"examples": GROK_TTS_VOICES},
+        description="Grok TTS voice ID (case-insensitive)",
+    )
+    language: str = Field(
+        default="en",
+        json_schema_extra={"examples": GROK_TTS_LANGUAGES},
+        description="Language code (en, zh, pt-BR, or auto)",
+    )
+    codec: str = Field(
+        default="pcm",
+        json_schema_extra={"examples": GROK_TTS_CODECS},
+        description="Audio codec for output (pcm for pipeline, mulaw for telephony)",
+    )
+    telephony_sample_rate: int = Field(
+        default=8000,
+        json_schema_extra={"examples": GROK_TELEPHONY_SAMPLE_RATES},
+        description="Sample rate for telephony calls (max 16 kHz)",
+    )
+    web_sample_rate: int = Field(
+        default=24000,
+        json_schema_extra={"examples": GROK_WEB_SAMPLE_RATES},
+        description="Sample rate for web/WebRTC calls",
+    )
+    api_key: str
+
+
 TTSConfig = Annotated[
     Union[
         DeepgramTTSConfiguration,
@@ -781,6 +828,7 @@ TTSConfig = Annotated[
         SmallestAITTSConfiguration,
         VoicemakerTTSConfiguration,
         MurfTTSConfiguration,
+        GrokTTSConfiguration,
     ],
     Field(discriminator="provider"),
 ]
