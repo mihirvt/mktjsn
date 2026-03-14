@@ -150,8 +150,21 @@ When building dropdowns or selection lists from a provider's API:
 * Common mapping traps: camelCase vs snake_case, nested objects vs flat fields, arrays vs single strings.
 * What you store in config must be the **API's internal identifier**, not the display name the UI shows. The UI renders a human label; the config stores a machine slug.
 
+### Step 8: The Full Wiring Checklist (Don't Skip Any!)
+Every new provider must be registered in **all** of these files. Missing even one causes a different silent or confusing failure:
+
+| File | What to add | Failure if skipped |
+|------|-------------|-------------------|
+| `api/services/configuration/registry.py` | 1) Enum value in `ServiceProviders` 2) Add to `BaseServiceConfiguration.provider` Literal 3) `@register_tts`/`@register_llm`/`@register_stt` config class 4) Add to `TTSConfig`/`LLMConfig`/`STTConfig` Union | Provider doesn't appear in UI dropdown; config save crashes with Pydantic validation error |
+| `api/services/configuration/check_validity.py` | 1) Validator method (e.g. `_check_grok_api_key`) 2) Entry in `self._validator_map` | **"Invalid API key" error even with a correct key** — the validator returns `False` for unknown providers. This is the #1 most common integration bug. |
+| `api/services/pipecat/service_factory.py` | 1) Import the service 2) `elif` branch in `create_tts_service` / `create_llm_service` / `create_stt_service` | `HTTPException 400: Invalid TTS provider` at call time |
+| `api/routes/user.py` | 1) Add to `TTSProvider` Literal 2) Voice discovery block (if provider has voices) | Voice dropdown empty; 422 if user hits `/configurations/voices/{provider}` |
+| `api/services/pricing/tts.py` (or `llm.py`/`stt.py`) | Pricing entry | Cost tracking returns $0 or falls through to default |
+
+**The `check_validity.py` trap deserves special emphasis:** The `_check_api_key()` method returns `False` for any provider not in `_validator_map`. This means a completely valid API key will show as "Invalid {provider} API key" in the UI. **Always add your provider to `_validator_map`** — even if the validator just does `return True`. The fallback has been changed to soft-pass (return True) for unknown providers as a safety net, but always add an explicit entry.
+
 ---
 **SUMMARY:**
 When updating the app: Fetch from upstream -> `git rebase` -> Fix conflicts with isolated plugins -> Enforce RAM ceilings -> Check Database Migrations -> Force Deploy.
 
-When integrating a new provider: Get a working API call first → Log raw responses → Trace the full data flow → Match framework signatures → Cast types explicitly → Compare your full payload against docs → Check streaming/control flags.
+When integrating a new provider: Get a working API call first → Log raw responses → Trace the full data flow → Match framework signatures → Cast types explicitly → Compare your full payload against docs → Check streaming/control flags → **Wire into ALL files from Step 8 checklist (especially check_validity.py!).**

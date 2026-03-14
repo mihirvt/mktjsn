@@ -49,6 +49,7 @@ class UserConfigurationValidator:
             ServiceProviders.SONIOX.value: self._check_soniox_api_key,
             ServiceProviders.VOICEMAKER.value: self._check_voicemaker_api_key,
             ServiceProviders.MURF.value: self._check_murf_api_key,
+            ServiceProviders.GROK.value: self._check_grok_api_key,
         }
 
     async def validate(self, configuration: UserConfiguration) -> APIKeyStatusResponse:
@@ -101,8 +102,15 @@ class UserConfigurationValidator:
 
         validator = self._validator_map.get(provider_val)
         if not validator:
-            logger.warning(f"No API key validator configured for provider '{provider_val}'")
-            return False
+            # IMPORTANT: Unknown providers are soft-passed (True) rather than
+            # rejected so that newly added providers don't break on save before
+            # their validator is wired in.  If you want strict validation for a
+            # new provider, add it to _validator_map explicitly.
+            logger.warning(
+                f"No API key validator configured for provider '{provider_val}' — "
+                "soft-passing. Add an entry to _validator_map if strict validation is needed."
+            )
+            return True
 
         return validator(provider_val, normalized_api_key)
 
@@ -234,4 +242,8 @@ class UserConfigurationValidator:
         return bool(api_key and api_key.strip())
 
     def _check_murf_api_key(self, model: str, api_key: str) -> bool:
+        return bool(api_key and api_key.strip())
+
+    def _check_grok_api_key(self, model: str, api_key: str) -> bool:
+        """Simple presence check – xAI Grok API keys are just non-empty strings."""
         return bool(api_key and api_key.strip())
