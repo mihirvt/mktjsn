@@ -100,6 +100,8 @@ class MurfTTSService(TTSService):
         self._context_finished = asyncio.Event()
         self._context_finished.set()
         self._advanced_settings_sent = False
+        self._context_watchdog_task: Optional[asyncio.Task] = None
+        self._context_timeout_secs = 20.0
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -140,6 +142,7 @@ class MurfTTSService(TTSService):
         self._cleared_contexts.discard(turn_context_id)
         self._context_buffers[turn_context_id] = bytearray()
         self._started_contexts.add(turn_context_id)
+        self._schedule_context_watchdog(turn_context_id)
 
         await self.start_ttfb_metrics()
         await self.start_tts_usage_metrics(text)
@@ -169,13 +172,14 @@ class MurfTTSService(TTSService):
 
         try:
             logger.debug(f"Murf TTS connecting to {base_url} sample_rate={self._sample_rate}")
-            self._ws = await self._session.ws_connect(ws_url)
+            self._ws = await self._session.ws_connect(ws_url, heartbeat=20.0, autoping=True)
             self._receive_task = asyncio.create_task(self._receive_audio())
         except Exception as e:
             logger.error(f"Failed to connect to Murf TTS: {e}", exc_info=True)
             await self.push_frame(ErrorFrame(f"Murf TTS Connection Error: {e}"))
 
     async def _disconnect(self):
+        await self._cancel_context_watchdog()
         if self._receive_task:
             self._receive_task.cancel()
             try:
@@ -244,6 +248,7 @@ class MurfTTSService(TTSService):
         await self._send_json(payload)
         self._active_context_id = None
         self._context_finished.set()
+        await self._cancel_context_watchdog()
         if context_id in self._started_contexts:
             self._started_contexts.discard(context_id)
             await self.stop_ttfb_metrics()
@@ -259,6 +264,7 @@ class MurfTTSService(TTSService):
             await self._ws.send_json(payload)
         except Exception as e:
             logger.error(f"Failed to send payload to Murf TTS: {e}", exc_info=True)
+            await self._handle_socket_failure(f"Murf TTS Request Error: {e}")
             await self.push_frame(ErrorFrame(f"Murf TTS Request Error: {e}"))
 
     async def _receive_audio(self):
@@ -270,11 +276,19 @@ class MurfTTSService(TTSService):
                     await self._handle_text_message(msg.data)
                 elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                     logger.warning(f"Murf TTS WebSocket closed: {msg.type}")
+                    await self._handle_socket_failure(
+                        f"Murf TTS WebSocket closed before final event: {msg.type}",
+                        from_receive_task=True,
+                    )
                     break
         except asyncio.CancelledError:
             logger.debug("Murf TTS receive task cancelled")
         except Exception as e:
             logger.error(f"Murf TTS stream error: {e}", exc_info=True)
+            await self._handle_socket_failure(
+                f"Murf TTS Stream Error: {e}",
+                from_receive_task=True,
+            )
             await self.push_frame(ErrorFrame(f"Murf TTS Stream Error: {e}"))
 
     async def _handle_text_message(self, payload: str):
@@ -306,6 +320,8 @@ class MurfTTSService(TTSService):
                 return
 
             await self.stop_ttfb_metrics()
+            if context_id:
+                self._schedule_context_watchdog(context_id)
             audio_bytes = self._buffer_aligned_audio(context_id, audio_bytes)
             if not audio_bytes:
                 return
@@ -357,11 +373,88 @@ class MurfTTSService(TTSService):
                 if context_id == self._active_context_id:
                     self._active_context_id = None
                     self._context_finished.set()
+                    await self._cancel_context_watchdog()
             else:
                 self._active_context_id = None
                 self._context_finished.set()
+                await self._cancel_context_watchdog()
                 await self.push_frame(TTSStoppedFrame())
             logger.debug(f"Murf TTS final received for context {context_id}")
+
+    def _schedule_context_watchdog(self, context_id: str):
+        if self._context_watchdog_task:
+            self._context_watchdog_task.cancel()
+        self._context_watchdog_task = asyncio.create_task(self._context_watchdog(context_id))
+
+    async def _cancel_context_watchdog(self):
+        if not self._context_watchdog_task:
+            return
+        self._context_watchdog_task.cancel()
+        try:
+            await self._context_watchdog_task
+        except asyncio.CancelledError:
+            pass
+        self._context_watchdog_task = None
+
+    async def _context_watchdog(self, context_id: str):
+        try:
+            await asyncio.sleep(self._context_timeout_secs)
+            if self._active_context_id != context_id:
+                return
+            logger.warning(
+                f"Murf TTS context {context_id} timed out waiting for final after "
+                f"{self._context_timeout_secs}s"
+            )
+            await self._handle_socket_failure(
+                f"Murf TTS context {context_id} timed out waiting for final",
+                from_receive_task=False,
+            )
+            await self.push_frame(
+                ErrorFrame(
+                    f"Murf TTS context {context_id} timed out waiting for final"
+                )
+            )
+        except asyncio.CancelledError:
+            raise
+
+    async def _handle_socket_failure(self, reason: str, *, from_receive_task: bool):
+        context_id = self._active_context_id
+        logger.warning(
+            f"Murf TTS transport failure. reason={reason} active_context={context_id}"
+        )
+
+        self._active_context_id = None
+        self._context_finished.set()
+        self._header_pending_contexts.clear()
+        self._cleared_contexts.clear()
+        self._context_buffers.clear()
+        await self._cancel_context_watchdog()
+
+        if context_id and context_id in self._started_contexts:
+            self._started_contexts.discard(context_id)
+            await self.stop_ttfb_metrics()
+            await self.push_frame(TTSStoppedFrame(context_id=context_id))
+
+        current_task = asyncio.current_task()
+        receive_task = self._receive_task
+        self._receive_task = None
+
+        if receive_task and not from_receive_task and receive_task is not current_task:
+            receive_task.cancel()
+            try:
+                await receive_task
+            except asyncio.CancelledError:
+                pass
+
+        if self._ws:
+            await self._ws.close()
+            self._ws = None
+
+        if self._session:
+            await self._session.close()
+            self._session = None
+
+        self._advanced_settings_sent = False
 
     @staticmethod
     def _has_speakable_content(text: str) -> bool:

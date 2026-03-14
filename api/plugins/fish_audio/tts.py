@@ -10,7 +10,12 @@ def create_fish_tts(user_config, audio_config):
     """Create a Fish Audio TTS service with transport-aware sample-rate defaults."""
     try:
         from pipecat.frames.frames import ErrorFrame, TTSAudioRawFrame
-        from pipecat.services.fish.tts import FishAudioTTSService, ormsgpack
+        from pipecat.services.fish.tts import (
+            FishAudioTTSService,
+            State,
+            ormsgpack,
+            websocket_connect,
+        )
     except Exception as exc:
         logger.error(
             "Fish Audio SDK deps not found. Install pipecat with the fish extra: "
@@ -53,6 +58,43 @@ def create_fish_tts(user_config, audio_config):
     )
 
     class DograhFishTTSService(FishAudioTTSService):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._connect_error_message = None
+
+        async def _connect_websocket(self):
+            self._connect_error_message = None
+            try:
+                if self._websocket and self._websocket.state is State.OPEN:
+                    return
+
+                logger.debug("Connecting to Fish Audio")
+                headers = {"Authorization": f"Bearer {self._api_key}", "model": self.model_name}
+                self._websocket = await websocket_connect(
+                    self._base_url, additional_headers=headers
+                )
+
+                start_message = {"event": "start", "request": {"text": "", **self._settings}}
+                await self._websocket.send(ormsgpack.packb(start_message))
+                logger.debug("Sent start message to Fish Audio")
+
+                await self._call_event_handler("on_connected")
+            except Exception as exc:
+                self._connect_error_message = str(exc)
+                await self.push_error(
+                    error_msg=f"Unknown error occurred: {exc}",
+                    exception=exc,
+                )
+                self._websocket = None
+                await self._call_event_handler("on_connection_error", f"{exc}")
+
+        async def _connect(self):
+            try:
+                await super()._connect()
+            except Exception as exc:
+                self._connect_error_message = str(exc)
+                raise
+
         async def _receive_messages(self):
             async for message in self._get_websocket():
                 try:
@@ -85,6 +127,14 @@ def create_fish_tts(user_config, audio_config):
             normalized = (text or "").strip()
             if not normalized or NON_SPEAKABLE_PATTERN.fullmatch(normalized):
                 logger.debug("Skipping non-speakable Fish TTS chunk: %r", text)
+                return
+
+            if not self._websocket:
+                await self._connect()
+
+            if not self._websocket:
+                error_message = self._connect_error_message or "Fish Audio websocket not connected"
+                await self.push_error(error_msg=error_message)
                 return
 
             async for frame in super().run_tts(text, context_id):
