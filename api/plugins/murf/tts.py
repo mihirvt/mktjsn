@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    InterruptionFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
@@ -117,10 +118,17 @@ class MurfTTSService(TTSService):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, StartInterruptionFrame):
-            await self._clear_active_context()
-            await self.push_frame(frame, direction)
-            return
+            logger.debug("Murf TTS received deprecated StartInterruptionFrame")
         await super().process_frame(frame, direction)
+
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
+        logger.debug(
+            "Murf TTS handling interruption "
+            f"frame={frame.__class__.__name__} direction={direction} "
+            f"active_context={self._active_context_id}"
+        )
+        await super()._handle_interruption(frame, direction)
+        await self._clear_active_context()
 
     @traced_tts
     async def run_tts(
@@ -133,6 +141,13 @@ class MurfTTSService(TTSService):
         if self._ws is None or self._ws.closed:
             yield ErrorFrame("Murf TTS WebSocket not connected")
             return
+
+        if not self._context_finished.is_set() and self._active_context_id:
+            logger.warning(
+                "Murf TTS detected stale active context "
+                f"{self._active_context_id} before starting new synthesis"
+            )
+            await self._clear_active_context()
 
         await self._context_finished.wait()
         turn_context_id = context_id or f"murf-{uuid.uuid4()}"
@@ -264,7 +279,10 @@ class MurfTTSService(TTSService):
             await self._ws.send_json(payload)
         except Exception as e:
             logger.error(f"Failed to send payload to Murf TTS: {e}", exc_info=True)
-            await self._handle_socket_failure(f"Murf TTS Request Error: {e}")
+            await self._handle_socket_failure(
+                f"Murf TTS Request Error: {e}",
+                from_receive_task=False,
+            )
             await self.push_frame(ErrorFrame(f"Murf TTS Request Error: {e}"))
 
     async def _receive_audio(self):
