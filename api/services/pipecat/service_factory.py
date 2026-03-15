@@ -529,24 +529,29 @@ def create_tts_service(user_config, audio_config: "AudioConfig"):
             # Cap telephony at 16 kHz
             sample_rate = min(sample_rate, 16000)
         else:
+            # For web calls, request from Inworld at whatever the user configured
+            # or the plugin default (24kHz). Inworld natively produces best quality
+            # at 24-48kHz. Capping it to pipeline 16kHz forces lossy server-side
+            # downsampling which degrades clarity. The pipeline resampler will
+            # handle conversion to transport_out rate (16kHz) far more cleanly.
             sample_rate = int(
                 getattr(
                     user_config.tts,
                     "web_sample_rate",
-                    audio_config.transport_out_sample_rate,
+                    24000,
                 )
-                or audio_config.transport_out_sample_rate
+                or 24000
             )
-        sample_rate = min(sample_rate, audio_config.transport_out_sample_rate)
         voice = getattr(user_config.tts, "voice", "Dennis") or "Dennis"
         model_id = getattr(user_config.tts, "model", "inworld-tts-1.5-max") or "inworld-tts-1.5-max"
         audio_encoding = getattr(user_config.tts, "audio_encoding", "PCM") or "PCM"
-        # For telephony with MULAW/ALAW transports, auto-pick encoding
+        # Auto-select MULAW only for Vonage (which uses mulaw natively).
+        # Vobiz uses audio/x-l16 (raw PCM) — do NOT override to MULAW for vobiz.
         if is_telephony and audio_encoding == "PCM":
             transport_type = getattr(audio_config, "transport_type", None)
-            if transport_type in ("vonage", "vobiz"):
-                audio_encoding = "MULAW"  # vonage/vobiz prefer mulaw
-                logger.debug("Inworld TTS: auto-selecting MULAW for telephony transport")
+            if transport_type == "vonage":
+                audio_encoding = "MULAW"
+                logger.debug("Inworld TTS: auto-selecting MULAW for Vonage telephony")
         return InworldTTSService(
             api_key=user_config.tts.api_key,
             voice_id=voice,
@@ -558,7 +563,7 @@ def create_tts_service(user_config, audio_config: "AudioConfig"):
                 speaking_rate=float(getattr(user_config.tts, "speaking_rate", 1.0) or 1.0),
                 auto_mode=bool(getattr(user_config.tts, "auto_mode", True)),
                 buffer_char_threshold=int(
-                    getattr(user_config.tts, "buffer_char_threshold", 100) or 100
+                    getattr(user_config.tts, "buffer_char_threshold", 60) or 60
                 ),
                 max_buffer_delay_ms=int(
                     getattr(user_config.tts, "max_buffer_delay_ms", 0) or 0

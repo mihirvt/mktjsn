@@ -78,6 +78,9 @@ class InworldTTSService(TTSService):
     For the Pipecat pipeline (telephony / web) we default to PCM (raw 16-bit
     signed little-endian) which avoids WAV header stripping and is compatible
     with all downstream transports.
+
+    IMPORTANT: Always use PCM for Vobiz/telephony transports. WAV and LINEAR16
+    embed RIFF headers that cause static noise if not perfectly stripped.
     """
 
     class InputParams:
@@ -197,88 +200,99 @@ class InworldTTSService(TTSService):
             yield ErrorFrame("Inworld TTS WebSocket not connected")
             return
 
-        # ---- SERIALIZE: Wait for any previous context to fully finish ----
-        # This is the key serialization point. We must NOT clear the previous
-        # context prematurely — that causes overlapping audio.
-        try:
-            await asyncio.wait_for(
-                self._context_finished.wait(),
-                timeout=self._context_timeout_secs,
-            )
-        except asyncio.TimeoutError:
-            logger.warning(
-                "Inworld TTS: previous context did not finish within "
-                f"{self._context_timeout_secs}s — force-clearing"
-            )
-            await self._clear_active_context()
-
-        # Set up new context
         turn_pipeline_ctx = context_id or f"inworld-{uuid.uuid4()}"
-        inworld_ctx = f"ctx-{uuid.uuid4().hex[:12]}"
 
-        self._context_finished.clear()
-        self._ctx_map[inworld_ctx] = turn_pipeline_ctx
-        self._active_inworld_ctx = inworld_ctx
-        self._ctx_audio_buffers[inworld_ctx] = bytearray()
-        self._started_pipeline_ctxs.add(turn_pipeline_ctx)
-        self._first_chunk_for_ctx.add(inworld_ctx)
-        self._context_ready.clear()
-        self._context_creation_failed = False
-        self._schedule_context_watchdog(inworld_ctx)
+        # ---- Persistent context: reuse existing or create new ----
+        # Instead of creating/closing a context per sentence (which adds
+        # ~200-400ms overhead per sentence and causes choppy transitions),
+        # we keep ONE context alive for the entire turn. With autoMode on,
+        # the Inworld server handles buffering and flushing internally.
+        # Context is only closed on interruption or session end.
+        if self._active_inworld_ctx is None:
+            # Wait for any previous context to fully close (e.g. from interruption)
+            try:
+                await asyncio.wait_for(
+                    self._context_finished.wait(),
+                    timeout=self._context_timeout_secs,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Inworld TTS: previous context did not finish within "
+                    f"{self._context_timeout_secs}s — force-clearing"
+                )
+                await self._clear_active_context()
 
-        await self.start_ttfb_metrics()
-        await self.start_tts_usage_metrics(text)
-        yield TTSStartedFrame(context_id=turn_pipeline_ctx)
+            # Create a new Inworld context
+            inworld_ctx = f"ctx-{uuid.uuid4().hex[:12]}"
 
-        # 1. Create a context
-        create_msg = {
-            "create": {
-                "voiceId": self._voice_id,
-                "modelId": self._model_id,
-                "audioConfig": {
-                    "audioEncoding": self._audio_encoding,
-                    "sampleRateHertz": int(self._sample_rate),
-                    "speakingRate": round(float(self._params.speaking_rate), 2),
+            self._context_finished.clear()
+            self._ctx_map[inworld_ctx] = turn_pipeline_ctx
+            self._active_inworld_ctx = inworld_ctx
+            self._ctx_audio_buffers[inworld_ctx] = bytearray()
+            self._started_pipeline_ctxs.add(turn_pipeline_ctx)
+            self._first_chunk_for_ctx.add(inworld_ctx)
+            self._context_ready.clear()
+            self._context_creation_failed = False
+            self._schedule_context_watchdog(inworld_ctx)
+
+            await self.start_ttfb_metrics()
+            await self.start_tts_usage_metrics(text)
+            yield TTSStartedFrame(context_id=turn_pipeline_ctx)
+
+            create_msg = {
+                "create": {
+                    "voiceId": self._voice_id,
+                    "modelId": self._model_id,
+                    "audioConfig": {
+                        "audioEncoding": self._audio_encoding,
+                        "sampleRateHertz": int(self._sample_rate),
+                        "speakingRate": round(float(self._params.speaking_rate), 2),
+                    },
+                    "temperature": round(float(self._params.temperature), 2),
+                    "autoMode": bool(self._params.auto_mode),
+                    "bufferCharThreshold": int(self._params.buffer_char_threshold),
                 },
-                "temperature": round(float(self._params.temperature), 2),
-                "autoMode": bool(self._params.auto_mode),
-                "bufferCharThreshold": int(self._params.buffer_char_threshold),
-            },
-            "contextId": inworld_ctx,
-        }
-        if self._params.max_buffer_delay_ms > 0:
-            create_msg["create"]["maxBufferDelayMs"] = int(
-                self._params.max_buffer_delay_ms
-            )
+                "contextId": inworld_ctx,
+            }
+            if self._params.max_buffer_delay_ms > 0:
+                create_msg["create"]["maxBufferDelayMs"] = int(
+                    self._params.max_buffer_delay_ms
+                )
 
-        await self._send_json(create_msg)
+            await self._send_json(create_msg)
 
-        # Wait for contextCreated confirmation (with timeout)
-        try:
-            await asyncio.wait_for(self._context_ready.wait(), timeout=10.0)
-        except asyncio.TimeoutError:
-            logger.error("Inworld TTS: Timed out waiting for contextCreated")
-            yield ErrorFrame("Inworld TTS: context creation timed out")
-            await self._clear_active_context()
-            return
+            # Wait for contextCreated confirmation (with timeout)
+            try:
+                await asyncio.wait_for(self._context_ready.wait(), timeout=10.0)
+            except asyncio.TimeoutError:
+                logger.error("Inworld TTS: Timed out waiting for contextCreated")
+                yield ErrorFrame("Inworld TTS: context creation timed out")
+                await self._clear_active_context()
+                return
 
-        # If the context creation returned an error (e.g. invalid voice),
-        # do NOT send any text — abort immediately.
-        if self._context_creation_failed:
-            logger.warning(
-                f"Inworld TTS: context creation failed for ctx={inworld_ctx}, "
-                f"aborting text send"
-            )
-            await self._clear_active_context()
-            return
+            if self._context_creation_failed:
+                logger.warning(
+                    f"Inworld TTS: context creation failed for ctx={inworld_ctx}, "
+                    f"aborting text send"
+                )
+                await self._clear_active_context()
+                return
+        else:
+            # Reuse existing context — just update the pipeline mapping
+            inworld_ctx = self._active_inworld_ctx
+            self._ctx_map[inworld_ctx] = turn_pipeline_ctx
+            if turn_pipeline_ctx not in self._started_pipeline_ctxs:
+                self._started_pipeline_ctxs.add(turn_pipeline_ctx)
+                yield TTSStartedFrame(context_id=turn_pipeline_ctx)
+            await self.start_tts_usage_metrics(text)
+            self._schedule_context_watchdog(inworld_ctx)
 
-        # 2. Send text with flush
+        # Send text — with autoMode on, the server handles flush timing.
         # Inworld has a 1000-char limit per send_text. Chunk if needed.
         remaining = text
         while remaining:
             chunk = remaining[:1000]
             remaining = remaining[1000:]
-            is_last_chunk = len(remaining) == 0
 
             send_msg = {
                 "send_text": {
@@ -286,9 +300,6 @@ class InworldTTSService(TTSService):
                 },
                 "contextId": inworld_ctx,
             }
-            if is_last_chunk:
-                send_msg["send_text"]["flush_context"] = {}
-
             await self._send_json(send_msg)
 
     # ------------------------------------------------------------------
@@ -504,15 +515,14 @@ class InworldTTSService(TTSService):
         # --- flushCompleted ---
         if "flushCompleted" in result:
             logger.debug(f"Inworld TTS flush completed for ctx {inworld_ctx}")
-            # After flush completes, close the context to release resources
-            if inworld_ctx and self._ws and not self._ws.closed:
-                try:
-                    await self._send_json({
-                        "close_context": {},
-                        "contextId": inworld_ctx,
-                    })
-                except Exception as e:
-                    logger.warning(f"Inworld TTS failed to close ctx after flush: {e}")
+            # With persistent context + autoMode, flushCompleted indicates a
+            # generation batch finished. The context stays open for more text.
+            # Push TTSStoppedFrame to signal this generation is done, but
+            # keep the Inworld context alive for reuse.
+            if pipeline_ctx and pipeline_ctx in self._started_pipeline_ctxs:
+                self._started_pipeline_ctxs.discard(pipeline_ctx)
+                await self.push_frame(TTSStoppedFrame(context_id=pipeline_ctx))
+            await self.stop_ttfb_metrics()
             return
 
         # --- contextClosed ---
@@ -697,21 +707,17 @@ class InworldTTSService(TTSService):
         """Strip WAV/RIFF header from audio chunks if encoding produces them.
 
         - LINEAR16: WAV header on EVERY chunk → strip from all chunks.
-        - WAV: WAV header on FIRST chunk only (and first after each flush).
+        - WAV: WAV header on first chunk of each *event* (including auto-mode
+          internal flushes). With autoMode, Inworld may produce multiple events
+          within a single context, so we must check ALL chunks for RIFF headers.
         - PCM, MULAW, ALAW, MP3, OGG_OPUS: no header → pass through.
         """
-        if self._audio_encoding == "LINEAR16":
-            # Every chunk has a 44-byte RIFF header
+        if self._audio_encoding in ("LINEAR16", "WAV"):
+            # Both LINEAR16 and WAV can have RIFF headers — check every chunk.
+            # LINEAR16: header on every chunk; WAV: header on first chunk of
+            # each generation event (can be multiple per context with autoMode).
             if len(audio_bytes) > _WAV_HEADER_SIZE and audio_bytes[:4] == b"RIFF":
                 return audio_bytes[_WAV_HEADER_SIZE:]
-            return audio_bytes
-
-        if self._audio_encoding == "WAV":
-            # Only the first chunk per context has the header
-            if inworld_ctx and inworld_ctx in self._first_chunk_for_ctx:
-                self._first_chunk_for_ctx.discard(inworld_ctx)
-                if len(audio_bytes) > _WAV_HEADER_SIZE and audio_bytes[:4] == b"RIFF":
-                    return audio_bytes[_WAV_HEADER_SIZE:]
             return audio_bytes
 
         return audio_bytes
