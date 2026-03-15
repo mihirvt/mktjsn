@@ -129,6 +129,7 @@ class InworldTTSService(TTSService):
         self._context_finished = asyncio.Event()
         self._context_finished.set()
         self._context_ready = asyncio.Event()  # set once contextCreated arrives
+        self._context_creation_failed = False  # set when context creation returns an error
         self._context_buffers: dict[str, bytearray] = {}
         self._context_watchdog_task: Optional[asyncio.Task] = None
         self._context_timeout_secs = 30.0
@@ -199,6 +200,7 @@ class InworldTTSService(TTSService):
         self._started_contexts.add(turn_context_id)
         self._first_chunk_for_context.add(inworld_ctx)
         self._context_ready.clear()
+        self._context_creation_failed = False
         self._schedule_context_watchdog(turn_context_id)
 
         await self.start_ttfb_metrics()
@@ -213,18 +215,15 @@ class InworldTTSService(TTSService):
                 "audioConfig": {
                     "audioEncoding": self._audio_encoding,
                     "sampleRateHertz": int(self._sample_rate),
+                    "speakingRate": round(float(self._params.speaking_rate), 2),
                 },
-                "temperature": float(self._params.temperature),
+                "temperature": round(float(self._params.temperature), 2),
                 "autoMode": bool(self._params.auto_mode),
                 "bufferCharThreshold": int(self._params.buffer_char_threshold),
                 "applyTextNormalization": self._params.apply_text_normalization,
             },
             "contextId": inworld_ctx,
         }
-        if self._params.speaking_rate != 1.0:
-            create_msg["create"]["audioConfig"]["speakingRate"] = float(
-                self._params.speaking_rate
-            )
         if self._params.max_buffer_delay_ms > 0:
             create_msg["create"]["maxBufferDelayMs"] = int(
                 self._params.max_buffer_delay_ms
@@ -238,6 +237,16 @@ class InworldTTSService(TTSService):
         except asyncio.TimeoutError:
             logger.error("Inworld TTS: Timed out waiting for contextCreated")
             yield ErrorFrame("Inworld TTS: context creation timed out")
+            await self._clear_active_context()
+            return
+
+        # If the context creation returned an error (e.g. invalid voice),
+        # do NOT send any text — abort immediately.
+        if self._context_creation_failed:
+            logger.warning(
+                f"Inworld TTS: context creation failed for ctx={inworld_ctx}, "
+                f"aborting text send"
+            )
             await self._clear_active_context()
             return
 
@@ -392,8 +401,15 @@ class InworldTTSService(TTSService):
         if status.get("code", 0) != 0:
             error_msg = status.get("message", "Unknown Inworld TTS error")
             logger.error(f"Inworld TTS API error: code={status.get('code')} message={error_msg}")
+            # Mark creation as failed so run_tts won't try to send text
+            self._context_creation_failed = True
+            self._context_ready.set()  # unblock the waiter
+            # Clean up the context fully
+            if context_id and context_id in self._started_contexts:
+                self._started_contexts.discard(context_id)
+                await self.push_frame(TTSStoppedFrame(context_id=context_id))
             self._context_finished.set()
-            self._context_ready.set()
+            await self._cancel_context_watchdog()
             await self.push_frame(ErrorFrame(f"Inworld TTS Error: {error_msg}"))
             return
 
@@ -538,6 +554,7 @@ class InworldTTSService(TTSService):
         self._active_context_id = None
         self._inworld_context_id = None
         self._context_finished.set()
+        self._context_creation_failed = False
         self._context_ready.set()
         await self._cancel_context_watchdog()
 
@@ -592,6 +609,7 @@ class InworldTTSService(TTSService):
         self._active_context_id = None
         self._inworld_context_id = None
         self._context_finished.set()
+        self._context_creation_failed = False
         self._context_ready.set()
         self._cleared_contexts.clear()
         self._context_buffers.clear()

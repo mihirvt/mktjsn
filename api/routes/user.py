@@ -617,10 +617,10 @@ async def get_voices(
 
             import httpx
 
+            # Fetch all voices — no language filter so custom cloned voices are included
             async with httpx.AsyncClient(timeout=15.0) as client:
                 res = await client.get(
                     "https://api.inworld.ai/tts/v1/voices",
-                    params={"filter": "language=en"},
                     headers={"Authorization": f"Basic {api_key}"},
                 )
 
