@@ -90,7 +90,7 @@ export const ConfigurationsDialog = ({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-lg">
+            <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle>Configurations</DialogTitle>
                 </DialogHeader>
@@ -282,13 +282,13 @@ export const ConfigurationsDialog = ({
                                 <Input
                                     id="smart_turn_stop_secs"
                                     type="number"
-                                    step="0.5"
-                                    min="0.5"
+                                    step="0.1"
+                                    min="0.1"
                                     max="10"
                                     value={smartTurnStopSecs}
                                     onChange={(e) => {
                                         const value = parseFloat(e.target.value);
-                                        if (!isNaN(value) && value >= 0.5) {
+                                        if (!isNaN(value) && value >= 0.1) {
                                             setSmartTurnStopSecs(value);
                                         }
                                     }}

@@ -168,3 +168,25 @@ Every new provider must be registered in **all** of these files. Missing even on
 When updating the app: Fetch from upstream -> `git rebase` -> Fix conflicts with isolated plugins -> Enforce RAM ceilings -> Check Database Migrations -> Force Deploy.
 
 When integrating a new provider: Get a working API call first → Log raw responses → Trace the full data flow → Match framework signatures → Cast types explicitly → Compare your full payload against docs → Check streaming/control flags → **Wire into ALL files from Step 8 checklist (especially check_validity.py!).**
+
+## 🎙️ 9. TTS Context & Streaming Pipelines (The "Micro-Latency" Traps)
+
+Our Pipecat pipeline is highly sensitive to the way text is streamed to TTS providers. We've repeatedly hit the same three failure modes when integrating fast streaming TTS (like Inworld, ElevenLabs, Cartesia). Do not repeat these mistakes:
+
+### Trap 1: Server-Side Downsampling (The "Not HD" bug)
+* **The Error:** A user complains the voice sounds muffled, robotic, or "not like the playground." You try increasing the sample rate in the UI, but it doesn't help or gets worse.
+* **The Cause:** If you cap the `sample_rate` parameter sent to the TTS provider's API (e.g., using `min(sample_rate, 16000)` because WebRTC VAD needs 16kHz), the TTS provider will perform a fast, lossy *server-side downsample* from their native 48kHz down to 16kHz before sending the audio over the network.
+* **The Fix:** Always request audio from the TTS provider at their highest/native quality sweet spot (usually **24kHz or 48kHz**), regardless of what the final transport requires. Send that high-res `TTSAudioRawFrame` directly into the Pipecat pipeline. Pipecat's internal audio resampler handles the conversion down to the transport rate (16kHz for WebRTC, 8kHz for telephony) with much higher fidelity than a provider's server-side downsampler.
+
+### Trap 2: Context-Per-Utterance Churn (The "Choppiness" bug)
+* **The Error:** The bot speaks with 300ms gaps between sentences, losing natural prosody. The UI or pipeline looks fine.
+* **The Cause:** You wrote the TTS plugin to do a full `create_context` → `send_text` → `close_context` lifecycle for *every individual sentence* emitted by the LLM. Every cycle adds huge network overhead.
+* **The Fix:** Use a **persistent context lifecycle**. Open a WebSocket connection and create the context *once* at the start of the agent's turn. Then, simply stream chunks of text (`send_text`) repeatedly into that same open context. Let the provider's internal buffering (`autoMode` or auto-flush) handle the timing. Only send `close_context` when the turn actually ends (or is interrupted).
+
+### Trap 3: WAV Header Encapsulation (The "Static Noise" bug)
+* **The Error:** The user hears brief bursts of harsh static noise before the agent speaks, or in between sentences.
+* **The Cause:** Raw Pipecat pipelines expect **PCM** (raw 16-bit signed little-endian audio, no headers). Some TTS encodings (like `WAV` or `LINEAR16`) wrap the PCM data inside a 44-byte RIFF header. If you inject a 44-byte chunk of metadata into a raw audio stream, it gets played out the speaker as a horrifying 0.05-second screech.
+* **The Fix:**
+  1. Default to requesting raw headerless **PCM** encoding from the provider if possible.
+  2. If the user explicitly selects `WAV` or `LINEAR16`, your plugin *must* strip the first 44 bytes (`b"RIFF"`) from the binary payload before yielding it to Pipecat.
+  3. **Warning:** If the provider flushes buffers internally (like Inworld's autoMode), they might inject *multiple* WAV headers mid-stream during a single turn. Your stripping logic must check *every incoming chunk* for `chunk.startswith(b"RIFF")`, not just the very first chunk.
