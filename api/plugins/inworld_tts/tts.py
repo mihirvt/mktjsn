@@ -17,8 +17,9 @@ Protocol reference (bidirectional WebSocket):
     Flush completed:  {"result": {"contextId": "...", "flushCompleted": {}, "status": {...}}}
     Context closed:   {"result": {"contextId": "...", "contextClosed": {}, "status": {...}}}
 
-  Multi-utterance: connection stays open. Close the context after each
-  turn completes, then create a new context for the next turn.
+  Multi-utterance: connection stays open. Each run_tts call creates a new
+  context, sends text, waits for audio, then closes that context before the
+  next run_tts can proceed.
 """
 
 import asyncio
@@ -88,14 +89,12 @@ class InworldTTSService(TTSService):
             auto_mode: bool = True,
             buffer_char_threshold: int = 100,
             max_buffer_delay_ms: int = 0,
-            apply_text_normalization: str = "APPLY_TEXT_NORMALIZATION_UNSPECIFIED",
         ):
             self.temperature = temperature
             self.speaking_rate = speaking_rate
             self.auto_mode = auto_mode
             self.buffer_char_threshold = buffer_char_threshold
             self.max_buffer_delay_ms = max_buffer_delay_ms
-            self.apply_text_normalization = apply_text_normalization
 
     def __init__(
         self,
@@ -121,19 +120,37 @@ class InworldTTSService(TTSService):
         self._ws: Optional[aiohttp.ClientWebSocketResponse] = None
         self._receive_task: Optional[asyncio.Task] = None
 
-        # Context lifecycle
-        self._active_context_id: Optional[str] = None
-        self._inworld_context_id: Optional[str] = None  # Inworld's context id
-        self._started_contexts: set[str] = set()
-        self._cleared_contexts: set[str] = set()
+        # Context lifecycle — serializes access so only ONE context is active
+        # at a time. _context_finished is cleared when a context starts and
+        # set when its contextClosed message arrives.
         self._context_finished = asyncio.Event()
         self._context_finished.set()
-        self._context_ready = asyncio.Event()  # set once contextCreated arrives
-        self._context_creation_failed = False  # set when context creation returns an error
-        self._context_buffers: dict[str, bytearray] = {}
+        self._context_ready = asyncio.Event()        # set once contextCreated arrives
+        self._context_creation_failed = False         # set when context creation returns error
+
+        # Mapping: Inworld contextId → pipeline context_id
+        # This is the critical mapping that prevents audio from one Inworld
+        # context from being attributed to the wrong pipeline context.
+        self._ctx_map: dict[str, str] = {}
+
+        # Track which Inworld contexts have been cleared (interrupted)
+        self._cleared_inworld_ctxs: set[str] = set()
+
+        # Track which pipeline contexts have received TTSStartedFrame
+        self._started_pipeline_ctxs: set[str] = set()
+
+        # Audio alignment buffers keyed by Inworld context ID
+        self._ctx_audio_buffers: dict[str, bytearray] = {}
+
+        # Track first audio chunk per Inworld context (for WAV header stripping)
+        self._first_chunk_for_ctx: set[str] = set()
+
+        # The currently active Inworld context ID (the one run_tts is using)
+        self._active_inworld_ctx: Optional[str] = None
+
+        # Watchdog
         self._context_watchdog_task: Optional[asyncio.Task] = None
         self._context_timeout_secs = 30.0
-        self._first_chunk_for_context: set[str] = set()  # track first chunks for LINEAR16/WAV header stripping
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -159,7 +176,7 @@ class InworldTTSService(TTSService):
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         logger.debug(
             f"Inworld TTS handling interruption frame={frame.__class__.__name__} "
-            f"direction={direction} active_context={self._active_context_id}"
+            f"direction={direction} active_inworld_ctx={self._active_inworld_ctx}"
         )
         await super()._handle_interruption(frame, direction)
         await self._clear_active_context()
@@ -180,32 +197,38 @@ class InworldTTSService(TTSService):
             yield ErrorFrame("Inworld TTS WebSocket not connected")
             return
 
-        # If we still have a dangling previous context, force-finish it
-        if not self._context_finished.is_set() and self._active_context_id:
+        # ---- SERIALIZE: Wait for any previous context to fully finish ----
+        # This is the key serialization point. We must NOT clear the previous
+        # context prematurely — that causes overlapping audio.
+        try:
+            await asyncio.wait_for(
+                self._context_finished.wait(),
+                timeout=self._context_timeout_secs,
+            )
+        except asyncio.TimeoutError:
             logger.warning(
-                f"Inworld TTS detected stale active context "
-                f"{self._active_context_id} — clearing before new synthesis"
+                "Inworld TTS: previous context did not finish within "
+                f"{self._context_timeout_secs}s — force-clearing"
             )
             await self._clear_active_context()
 
-        await self._context_finished.wait()
-        turn_context_id = context_id or f"inworld-{uuid.uuid4()}"
+        # Set up new context
+        turn_pipeline_ctx = context_id or f"inworld-{uuid.uuid4()}"
         inworld_ctx = f"ctx-{uuid.uuid4().hex[:12]}"
 
         self._context_finished.clear()
-        self._active_context_id = turn_context_id
-        self._inworld_context_id = inworld_ctx
-        self._cleared_contexts.discard(turn_context_id)
-        self._context_buffers[turn_context_id] = bytearray()
-        self._started_contexts.add(turn_context_id)
-        self._first_chunk_for_context.add(inworld_ctx)
+        self._ctx_map[inworld_ctx] = turn_pipeline_ctx
+        self._active_inworld_ctx = inworld_ctx
+        self._ctx_audio_buffers[inworld_ctx] = bytearray()
+        self._started_pipeline_ctxs.add(turn_pipeline_ctx)
+        self._first_chunk_for_ctx.add(inworld_ctx)
         self._context_ready.clear()
         self._context_creation_failed = False
-        self._schedule_context_watchdog(turn_context_id)
+        self._schedule_context_watchdog(inworld_ctx)
 
         await self.start_ttfb_metrics()
         await self.start_tts_usage_metrics(text)
-        yield TTSStartedFrame(context_id=turn_context_id)
+        yield TTSStartedFrame(context_id=turn_pipeline_ctx)
 
         # 1. Create a context
         create_msg = {
@@ -220,7 +243,6 @@ class InworldTTSService(TTSService):
                 "temperature": round(float(self._params.temperature), 2),
                 "autoMode": bool(self._params.auto_mode),
                 "bufferCharThreshold": int(self._params.buffer_char_threshold),
-                "applyTextNormalization": self._params.apply_text_normalization,
             },
             "contextId": inworld_ctx,
         }
@@ -306,11 +328,11 @@ class InworldTTSService(TTSService):
         await self._cancel_context_watchdog()
 
         # Try to close any active Inworld context gracefully
-        if self._inworld_context_id and self._ws and not self._ws.closed:
+        if self._active_inworld_ctx and self._ws and not self._ws.closed:
             try:
                 await self._send_json({
                     "close_context": {},
-                    "contextId": self._inworld_context_id,
+                    "contextId": self._active_inworld_ctx,
                 })
             except Exception:
                 pass  # best-effort
@@ -331,13 +353,14 @@ class InworldTTSService(TTSService):
             await self._session.close()
             self._session = None
 
-        self._active_context_id = None
-        self._inworld_context_id = None
-        self._cleared_contexts.clear()
-        self._started_contexts.clear()
-        self._context_buffers.clear()
-        self._first_chunk_for_context.clear()
+        self._active_inworld_ctx = None
+        self._ctx_map.clear()
+        self._cleared_inworld_ctxs.clear()
+        self._started_pipeline_ctxs.clear()
+        self._ctx_audio_buffers.clear()
+        self._first_chunk_for_ctx.clear()
         self._context_finished.set()
+        self._context_creation_failed = False
         self._context_ready.set()
 
     async def _send_json(self, payload: dict):
@@ -394,27 +417,39 @@ class InworldTTSService(TTSService):
             return
 
         inworld_ctx = result.get("contextId")
-        context_id = self._active_context_id
+        # CRITICAL: Look up the pipeline context via the mapping, NOT from
+        # self._active_inworld_ctx. This prevents audio from one Inworld
+        # context being attributed to a different pipeline context.
+        pipeline_ctx = self._ctx_map.get(inworld_ctx) if inworld_ctx else None
         status = result.get("status", {})
 
         # Check for errors in status
         if status.get("code", 0) != 0:
             error_msg = status.get("message", "Unknown Inworld TTS error")
-            logger.error(f"Inworld TTS API error: code={status.get('code')} message={error_msg}")
+            logger.error(
+                f"Inworld TTS API error: code={status.get('code')} "
+                f"message={error_msg} inworld_ctx={inworld_ctx}"
+            )
             # Mark creation as failed so run_tts won't try to send text
             self._context_creation_failed = True
             self._context_ready.set()  # unblock the waiter
-            # Clean up the context fully
-            if context_id and context_id in self._started_contexts:
-                self._started_contexts.discard(context_id)
-                await self.push_frame(TTSStoppedFrame(context_id=context_id))
-            self._context_finished.set()
-            await self._cancel_context_watchdog()
+            # Clean up this specific context
+            if pipeline_ctx and pipeline_ctx in self._started_pipeline_ctxs:
+                self._started_pipeline_ctxs.discard(pipeline_ctx)
+                await self.push_frame(TTSStoppedFrame(context_id=pipeline_ctx))
+            # Only set _context_finished if this is the active context
+            if inworld_ctx and inworld_ctx == self._active_inworld_ctx:
+                self._context_finished.set()
+                await self._cancel_context_watchdog()
             await self.push_frame(ErrorFrame(f"Inworld TTS Error: {error_msg}"))
             return
 
-        if context_id and context_id in self._cleared_contexts:
-            logger.debug(f"Dropping stale Inworld chunk for cleared context {context_id}")
+        # Drop audio for cleared (interrupted) contexts
+        if inworld_ctx and inworld_ctx in self._cleared_inworld_ctxs:
+            logger.debug(f"Dropping message for cleared Inworld ctx {inworld_ctx}")
+            # Still handle contextClosed for cleanup
+            if "contextClosed" in result:
+                self._cleanup_inworld_ctx(inworld_ctx)
             return
 
         # --- contextCreated ---
@@ -437,15 +472,14 @@ class InworldTTSService(TTSService):
             if not audio_bytes:
                 return
 
-            # Strip WAV/RIFF headers for LINEAR16 (header per chunk) or WAV
-            # (header on first chunk) so downstream gets clean PCM.
+            # Strip WAV/RIFF headers for LINEAR16/WAV encodings
             audio_bytes = self._strip_wav_header_if_needed(inworld_ctx, audio_bytes)
 
             await self.stop_ttfb_metrics()
-            if context_id:
-                self._schedule_context_watchdog(context_id)
+            if inworld_ctx:
+                self._schedule_context_watchdog(inworld_ctx)
 
-            audio_bytes = self._buffer_aligned_audio(context_id, audio_bytes)
+            audio_bytes = self._buffer_aligned_audio(inworld_ctx, audio_bytes)
             if not audio_bytes:
                 return
 
@@ -454,8 +488,8 @@ class InworldTTSService(TTSService):
                 "sample_rate": self._sample_rate,
                 "num_channels": 1,
             }
-            if context_id:
-                frame_kwargs["context_id"] = context_id
+            if pipeline_ctx:
+                frame_kwargs["context_id"] = pipeline_ctx
             try:
                 frame = TTSAudioRawFrame(**frame_kwargs)
             except TypeError:
@@ -469,7 +503,7 @@ class InworldTTSService(TTSService):
 
         # --- flushCompleted ---
         if "flushCompleted" in result:
-            logger.debug(f"Inworld TTS flush completed for context {inworld_ctx}")
+            logger.debug(f"Inworld TTS flush completed for ctx {inworld_ctx}")
             # After flush completes, close the context to release resources
             if inworld_ctx and self._ws and not self._ws.closed:
                 try:
@@ -478,7 +512,7 @@ class InworldTTSService(TTSService):
                         "contextId": inworld_ctx,
                     })
                 except Exception as e:
-                    logger.warning(f"Inworld TTS failed to close context after flush: {e}")
+                    logger.warning(f"Inworld TTS failed to close ctx after flush: {e}")
             return
 
         # --- contextClosed ---
@@ -486,15 +520,15 @@ class InworldTTSService(TTSService):
             logger.debug(f"Inworld TTS context closed: {inworld_ctx}")
 
             # Flush any remaining buffered bytes
-            final_audio = self._flush_context_buffer(context_id)
+            final_audio = self._flush_ctx_buffer(inworld_ctx)
             if final_audio:
                 frame_kwargs = {
                     "audio": final_audio,
                     "sample_rate": self._sample_rate,
                     "num_channels": 1,
                 }
-                if context_id:
-                    frame_kwargs["context_id"] = context_id
+                if pipeline_ctx:
+                    frame_kwargs["context_id"] = pipeline_ctx
                 try:
                     frame = TTSAudioRawFrame(**frame_kwargs)
                 except TypeError:
@@ -505,40 +539,50 @@ class InworldTTSService(TTSService):
                     )
                 await self.push_frame(frame)
 
-            # Clean up the first-chunk tracker
-            if inworld_ctx:
-                self._first_chunk_for_context.discard(inworld_ctx)
+            # Push TTSStoppedFrame for this pipeline context
+            if pipeline_ctx and pipeline_ctx in self._started_pipeline_ctxs:
+                self._started_pipeline_ctxs.discard(pipeline_ctx)
+                await self.push_frame(TTSStoppedFrame(context_id=pipeline_ctx))
+            elif not pipeline_ctx:
+                await self.push_frame(TTSStoppedFrame())
 
-            if context_id:
-                self._cleared_contexts.discard(context_id)
-                if context_id in self._started_contexts:
-                    self._started_contexts.discard(context_id)
-                    await self.push_frame(TTSStoppedFrame(context_id=context_id))
-                if context_id == self._active_context_id:
-                    self._active_context_id = None
-                    self._inworld_context_id = None
-                    self._context_finished.set()
-                    await self._cancel_context_watchdog()
-            else:
-                self._active_context_id = None
-                self._inworld_context_id = None
+            # Mark context as finished if it's the active one
+            if inworld_ctx == self._active_inworld_ctx:
+                self._active_inworld_ctx = None
                 self._context_finished.set()
                 await self._cancel_context_watchdog()
-                await self.push_frame(TTSStoppedFrame())
+
+            # Cleanup mapping
+            self._cleanup_inworld_ctx(inworld_ctx)
             return
 
     # ------------------------------------------------------------------
     # Context management (interruptions, watchdogs)
     # ------------------------------------------------------------------
 
+    def _cleanup_inworld_ctx(self, inworld_ctx: str):
+        """Remove all traces of an Inworld context from internal state."""
+        self._ctx_map.pop(inworld_ctx, None)
+        self._ctx_audio_buffers.pop(inworld_ctx, None)
+        self._first_chunk_for_ctx.discard(inworld_ctx)
+        self._cleared_inworld_ctxs.discard(inworld_ctx)
+
     async def _clear_active_context(self):
-        context_id = self._active_context_id
-        inworld_ctx = self._inworld_context_id
-        if not context_id:
+        inworld_ctx = self._active_inworld_ctx
+        if not inworld_ctx:
             return
 
+        pipeline_ctx = self._ctx_map.get(inworld_ctx)
+        logger.debug(
+            f"Inworld TTS clearing active context: "
+            f"inworld_ctx={inworld_ctx} pipeline_ctx={pipeline_ctx}"
+        )
+
+        # Mark as cleared so receive loop drops further audio
+        self._cleared_inworld_ctxs.add(inworld_ctx)
+
         # Try to close on Inworld's side
-        if inworld_ctx and self._ws and not self._ws.closed:
+        if self._ws and not self._ws.closed:
             try:
                 await self._send_json({
                     "close_context": {},
@@ -547,27 +591,22 @@ class InworldTTSService(TTSService):
             except Exception:
                 pass
 
-        self._cleared_contexts.add(context_id)
-        self._context_buffers.pop(context_id, None)
-        if inworld_ctx:
-            self._first_chunk_for_context.discard(inworld_ctx)
-        self._active_context_id = None
-        self._inworld_context_id = None
+        self._active_inworld_ctx = None
         self._context_finished.set()
         self._context_creation_failed = False
         self._context_ready.set()
         await self._cancel_context_watchdog()
 
-        if context_id in self._started_contexts:
-            self._started_contexts.discard(context_id)
+        if pipeline_ctx and pipeline_ctx in self._started_pipeline_ctxs:
+            self._started_pipeline_ctxs.discard(pipeline_ctx)
             await self.stop_ttfb_metrics()
-            await self.push_frame(TTSStoppedFrame(context_id=context_id))
+            await self.push_frame(TTSStoppedFrame(context_id=pipeline_ctx))
 
-    def _schedule_context_watchdog(self, context_id: str):
+    def _schedule_context_watchdog(self, inworld_ctx: str):
         if self._context_watchdog_task:
             self._context_watchdog_task.cancel()
         self._context_watchdog_task = asyncio.create_task(
-            self._context_watchdog(context_id)
+            self._context_watchdog(inworld_ctx)
         )
 
     async def _cancel_context_watchdog(self):
@@ -580,46 +619,47 @@ class InworldTTSService(TTSService):
             pass
         self._context_watchdog_task = None
 
-    async def _context_watchdog(self, context_id: str):
+    async def _context_watchdog(self, inworld_ctx: str):
         try:
             await asyncio.sleep(self._context_timeout_secs)
-            if self._active_context_id != context_id:
+            if self._active_inworld_ctx != inworld_ctx:
                 return
             logger.warning(
-                f"Inworld TTS context {context_id} timed out after "
+                f"Inworld TTS context {inworld_ctx} timed out after "
                 f"{self._context_timeout_secs}s"
             )
             await self._handle_socket_failure(
-                f"Inworld TTS context {context_id} timed out",
+                f"Inworld TTS context {inworld_ctx} timed out",
                 from_receive_task=False,
             )
             await self.push_frame(
-                ErrorFrame(f"Inworld TTS context {context_id} timed out")
+                ErrorFrame(f"Inworld TTS context {inworld_ctx} timed out")
             )
         except asyncio.CancelledError:
             raise
 
     async def _handle_socket_failure(self, reason: str, *, from_receive_task: bool):
-        context_id = self._active_context_id
+        inworld_ctx = self._active_inworld_ctx
+        pipeline_ctx = self._ctx_map.get(inworld_ctx) if inworld_ctx else None
         logger.warning(
             f"Inworld TTS transport failure. reason={reason} "
-            f"active_context={context_id}"
+            f"active_inworld_ctx={inworld_ctx} pipeline_ctx={pipeline_ctx}"
         )
 
-        self._active_context_id = None
-        self._inworld_context_id = None
+        self._active_inworld_ctx = None
         self._context_finished.set()
         self._context_creation_failed = False
         self._context_ready.set()
-        self._cleared_contexts.clear()
-        self._context_buffers.clear()
-        self._first_chunk_for_context.clear()
+        self._ctx_map.clear()
+        self._cleared_inworld_ctxs.clear()
+        self._ctx_audio_buffers.clear()
+        self._first_chunk_for_ctx.clear()
         await self._cancel_context_watchdog()
 
-        if context_id and context_id in self._started_contexts:
-            self._started_contexts.discard(context_id)
+        if pipeline_ctx and pipeline_ctx in self._started_pipeline_ctxs:
+            self._started_pipeline_ctxs.discard(pipeline_ctx)
             await self.stop_ttfb_metrics()
-            await self.push_frame(TTSStoppedFrame(context_id=context_id))
+            await self.push_frame(TTSStoppedFrame(context_id=pipeline_ctx))
 
         current_task = asyncio.current_task()
         receive_task = self._receive_task
@@ -668,8 +708,8 @@ class InworldTTSService(TTSService):
 
         if self._audio_encoding == "WAV":
             # Only the first chunk per context has the header
-            if inworld_ctx and inworld_ctx in self._first_chunk_for_context:
-                self._first_chunk_for_context.discard(inworld_ctx)
+            if inworld_ctx and inworld_ctx in self._first_chunk_for_ctx:
+                self._first_chunk_for_ctx.discard(inworld_ctx)
                 if len(audio_bytes) > _WAV_HEADER_SIZE and audio_bytes[:4] == b"RIFF":
                     return audio_bytes[_WAV_HEADER_SIZE:]
             return audio_bytes
@@ -677,7 +717,7 @@ class InworldTTSService(TTSService):
         return audio_bytes
 
     def _buffer_aligned_audio(
-        self, context_id: Optional[str], audio_bytes: bytes
+        self, inworld_ctx: Optional[str], audio_bytes: bytes
     ) -> bytes:
         """Ensure audio is aligned to sample boundaries (e.g. 2 bytes for PCM16)."""
         alignment = _BYTES_PER_SAMPLE.get(self._audio_encoding, 2)
@@ -685,11 +725,11 @@ class InworldTTSService(TTSService):
             # No alignment needed for 1-byte codecs (mulaw, alaw, compressed)
             return audio_bytes
 
-        if not context_id:
+        if not inworld_ctx:
             aligned_length = len(audio_bytes) & ~(alignment - 1)
             return audio_bytes[:aligned_length]
 
-        buffer = self._context_buffers.setdefault(context_id, bytearray())
+        buffer = self._ctx_audio_buffers.setdefault(inworld_ctx, bytearray())
         buffer.extend(audio_bytes)
         aligned_length = len(buffer) & ~(alignment - 1)
         if aligned_length <= 0:
@@ -699,10 +739,10 @@ class InworldTTSService(TTSService):
         del buffer[:aligned_length]
         return aligned
 
-    def _flush_context_buffer(self, context_id: Optional[str]) -> bytes:
-        if not context_id:
+    def _flush_ctx_buffer(self, inworld_ctx: Optional[str]) -> bytes:
+        if not inworld_ctx:
             return b""
-        buffer = self._context_buffers.pop(context_id, None)
+        buffer = self._ctx_audio_buffers.pop(inworld_ctx, None)
         if not buffer:
             return b""
         alignment = _BYTES_PER_SAMPLE.get(self._audio_encoding, 2)

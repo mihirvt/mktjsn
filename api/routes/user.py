@@ -617,10 +617,11 @@ async def get_voices(
 
             import httpx
 
-            # Fetch all voices — no language filter so custom cloned voices are included
+            # Correct endpoint: /voices/v1/voices (not /tts/v1/voices)
+            # No language filter → lists ALL voices including custom clones
             async with httpx.AsyncClient(timeout=15.0) as client:
                 res = await client.get(
-                    "https://api.inworld.ai/tts/v1/voices",
+                    "https://api.inworld.ai/voices/v1/voices",
                     headers={"Authorization": f"Basic {api_key}"},
                 )
 
@@ -630,18 +631,25 @@ async def get_voices(
                 voices = []
                 for v in voice_list:
                     tags = v.get("tags", [])
+                    # Gender detection from tags
                     gender = next(
                         (tag for tag in tags if tag in {"male", "female", "neutral"}),
                         None,
                     )
-                    languages = v.get("languages", [])
+                    # Language from langCode field (e.g. "EN_US", "HI_IN")
+                    lang_code = v.get("langCode", "")
+                    # Source: SYSTEM = built-in, IVC = instant clone, PVC = professional clone
+                    source = v.get("source", "")
+                    desc = v.get("description", "") or ""
+                    if source and source != "SYSTEM":
+                        desc = f"[{source}] {desc}" if desc else f"[{source}]"
                     voices.append(
                         VoiceInfo(
                             voice_id=v.get("voiceId", ""),
                             name=v.get("displayName", v.get("voiceId", "")),
-                            description=v.get("description"),
+                            description=desc or None,
                             gender=gender,
-                            language=", ".join(languages) if languages else None,
+                            language=lang_code or None,
                         )
                     )
                 return VoicesResponse(provider="inworld", voices=voices)
