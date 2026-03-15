@@ -185,8 +185,8 @@ Our Pipecat pipeline is highly sensitive to the way text is streamed to TTS prov
 
 ### 🚫 DO NOT Pass WAV Headers into the Pipeline
 * **DO NOT** assume all encodings are raw audio.
-* **WHY:** Raw Pipecat pipelines expect pure **PCM** (raw 16-bit signed little-endian audio, zero headers). Competing encodings like `WAV` or `LINEAR16` prefix their audio data with a 44-byte RIFF metadata header. If those 44 bytes slip into the pipeline, they are played as a harsh burst of static noise.
+* **WHY:** Raw Pipecat pipelines expect pure **PCM** (raw 16-bit signed little-endian audio, zero metadata headers). Competing encodings like `WAV` or `LINEAR16` prefix their audio data with a 44-byte RIFF metadata header. If those 44 bytes slip into the pipeline, they are played as a harsh burst of static noise.
 * **INSTEAD:** 
-  1. Default your provider requests to raw, headerless PCM whenever supported.
-  2. If you *must* accept WAV or LINEAR16, your code must aggressively strip the first 44 bytes (`b"RIFF"`) from the binary payload.
-  3. **Critical Warning:** Providers with auto-flushing logic may inject *multiple* WAV headers mid-stream during a single turn. Your stripping logic must inspect *every incoming chunk* (`chunk.startswith(b"RIFF")`), not just the very first one!
+  1. If a provider explicitly supports and is stable with raw, headerless PCM, use it to avoid header stripping math entirely.
+  2. **However, some providers (like Inworld) might actually be more stable or sound better when their API is specifically asked for `WAV` due to their internal server quirks.** If you request `WAV` or `LINEAR16`, your code *must* aggressively strip the first 44 bytes (`b"RIFF...`) from the binary payload before sending it to Pipecat.
+  3. **Critical Warning:** Providers with auto-flushing logic may inject *multiple* WAV headers mid-stream during a single turn. Your stripping logic must inspect *every incoming chunk* (`chunk.startswith(b"RIFF")`), not just the very first chunk in the session!
