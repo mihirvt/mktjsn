@@ -334,6 +334,7 @@ TTSProvider = Literal[
     "voicemaker",
     "murf",
     "grok",
+    "inworld",
 ]
 
 
@@ -598,6 +599,57 @@ async def get_voices(
                 ),
             ]
             return VoicesResponse(provider="grok", voices=grok_voices)
+
+        if provider == "inworld":
+            user_config = await db_client.get_user_configurations(user.id)
+            api_key = None
+            if user_config.tts:
+                provider_val = (
+                    user_config.tts.provider.value
+                    if hasattr(user_config.tts.provider, "value")
+                    else user_config.tts.provider
+                )
+                if provider_val == "inworld":
+                    api_key = getattr(user_config.tts, "api_key", None)
+
+            if not api_key:
+                return VoicesResponse(provider="inworld", voices=[])
+
+            import httpx
+
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.get(
+                    "https://api.inworld.ai/tts/v1/voices",
+                    params={"filter": "language=en"},
+                    headers={"Authorization": f"Basic {api_key}"},
+                )
+
+            if res.status_code == 200:
+                data = res.json()
+                voice_list = data.get("voices", [])
+                voices = []
+                for v in voice_list:
+                    tags = v.get("tags", [])
+                    gender = next(
+                        (tag for tag in tags if tag in {"male", "female", "neutral"}),
+                        None,
+                    )
+                    languages = v.get("languages", [])
+                    voices.append(
+                        VoiceInfo(
+                            voice_id=v.get("voiceId", ""),
+                            name=v.get("displayName", v.get("voiceId", "")),
+                            description=v.get("description"),
+                            gender=gender,
+                            language=", ".join(languages) if languages else None,
+                        )
+                    )
+                return VoicesResponse(provider="inworld", voices=voices)
+            else:
+                logger.error(
+                    f"Failed to fetch Inworld voices: {res.status_code} {res.text[:300]}"
+                )
+                return VoicesResponse(provider="inworld", voices=[])
 
         result = await mps_service_key_client.get_voices(
             provider=provider,

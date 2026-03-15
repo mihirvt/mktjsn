@@ -32,6 +32,7 @@ class ServiceProviders(str, Enum):
     VOICEMAKER = "voicemaker"
     MURF = "murf"
     GROK = "grok"
+    INWORLD = "inworld"
 
 
 class BaseServiceConfiguration(BaseModel):
@@ -48,6 +49,7 @@ class BaseServiceConfiguration(BaseModel):
         ServiceProviders.DOGRAH,
         ServiceProviders.DEEPINFRA,
         ServiceProviders.GROK,
+        ServiceProviders.INWORLD,
         # ServiceProviders.SARVAM,
     ]
     api_key: str
@@ -816,6 +818,82 @@ class GrokTTSConfiguration(BaseTTSConfiguration):
     api_key: str
 
 
+INWORLD_TTS_MODELS = [
+    "inworld-tts-1.5-max",
+    "inworld-tts-1.5-mini",
+    "inworld-tts-1-max",
+    "inworld-tts-1",
+]
+INWORLD_TTS_ENCODINGS = ["PCM", "LINEAR16", "WAV", "MULAW", "ALAW", "MP3", "OGG_OPUS"]
+INWORLD_TTS_LANGUAGES = [
+    "en", "zh", "ja", "ko", "ru", "it", "es", "pt", "fr", "de", "pl", "nl", "hi", "he", "ar",
+]
+INWORLD_TELEPHONY_SAMPLE_RATES = [8000, 16000]
+INWORLD_WEB_SAMPLE_RATES = [16000, 22050, 24000, 44100, 48000]
+
+
+@register_tts
+class InworldTTSConfiguration(BaseTTSConfiguration):
+    provider: Literal[ServiceProviders.INWORLD] = ServiceProviders.INWORLD
+    model: str = Field(
+        default="inworld-tts-1.5-max",
+        json_schema_extra={"examples": INWORLD_TTS_MODELS},
+        description="Inworld TTS model identifier",
+    )
+    voice: str = Field(
+        default="Dennis",
+        description="Inworld voice ID (e.g. Dennis, Ashley, Alex). Supports custom cloned voices.",
+    )
+    language: str = Field(
+        default="en",
+        json_schema_extra={"examples": INWORLD_TTS_LANGUAGES},
+        description="Primary language code",
+    )
+    audio_encoding: str = Field(
+        default="PCM",
+        json_schema_extra={"examples": INWORLD_TTS_ENCODINGS},
+        description="Audio encoding for output (PCM for pipeline, MULAW/ALAW for telephony)",
+    )
+    temperature: float = Field(
+        default=1.1,
+        gt=0.0,
+        le=2.0,
+        description="Randomness when sampling audio tokens (0 exclusive to 2 inclusive). Default 1.1.",
+    )
+    speaking_rate: float = Field(
+        default=1.0,
+        ge=0.5,
+        le=1.5,
+        description="Speaking rate/speed (0.5 to 1.5). Values above 0.8 recommended.",
+    )
+    auto_mode: bool = Field(
+        default=True,
+        description="Let Inworld control buffered text flushing for minimal latency. Recommended for full sentences.",
+    )
+    buffer_char_threshold: int = Field(
+        default=100,
+        ge=0,
+        le=1000,
+        description="Min characters before auto-triggering synthesis (0 = default 1000)",
+    )
+    max_buffer_delay_ms: int = Field(
+        default=0,
+        ge=0,
+        description="Max ms to buffer before synthesis. 0 = no time limit.",
+    )
+    telephony_sample_rate: int = Field(
+        default=8000,
+        json_schema_extra={"examples": INWORLD_TELEPHONY_SAMPLE_RATES},
+        description="Sample rate for telephony calls (max 16 kHz)",
+    )
+    web_sample_rate: int = Field(
+        default=24000,
+        json_schema_extra={"examples": INWORLD_WEB_SAMPLE_RATES},
+        description="Sample rate for web/WebRTC calls",
+    )
+    api_key: str
+
+
 TTSConfig = Annotated[
     Union[
         DeepgramTTSConfiguration,
@@ -829,6 +907,7 @@ TTSConfig = Annotated[
         VoicemakerTTSConfiguration,
         MurfTTSConfiguration,
         GrokTTSConfiguration,
+        InworldTTSConfiguration,
     ],
     Field(discriminator="provider"),
 ]

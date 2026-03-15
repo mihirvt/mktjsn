@@ -39,5 +39,12 @@ TTS_PRICING: Dict[str, Dict[str, CharacterPricingModel]] = {
         "grok-tts": CharacterPricingModel(Decimal("0.005") / 1_000),
         "default": CharacterPricingModel(Decimal("0.005") / 1_000),
     },
+    ServiceProviders.INWORLD: {
+        "inworld-tts-1.5-max": CharacterPricingModel(Decimal("0.015") / 1_000),
+        "inworld-tts-1.5-mini": CharacterPricingModel(Decimal("0.006") / 1_000),
+        "inworld-tts-1-max": CharacterPricingModel(Decimal("0.015") / 1_000),
+        "inworld-tts-1": CharacterPricingModel(Decimal("0.015") / 1_000),
+        "default": CharacterPricingModel(Decimal("0.015") / 1_000),
+    },
     "default": {"default": CharacterPricingModel(Decimal("0.030") / 1_000)},
 }

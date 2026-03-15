@@ -28,6 +28,7 @@ from api.plugins.smallest_ai import SmallestAITTSService
 from api.plugins.voicemaker import VoicemakerTTSService
 from api.plugins.murf import MurfTTSService
 from api.plugins.grok_tts import GrokTTSService
+from api.plugins.inworld_tts import InworldTTSService
 from api.plugins.cartesia.tts import create_cartesia_tts
 from api.plugins.cartesia.stt import create_cartesia_stt
 from api.plugins.fish_audio.tts import create_fish_tts
@@ -505,6 +506,63 @@ def create_tts_service(user_config, audio_config: "AudioConfig"):
             language=language,
             params=GrokTTSService.InputParams(
                 language=language,
+            ),
+            text_filters=[xml_function_tag_filter],
+        )
+    elif user_config.tts.provider == ServiceProviders.INWORLD.value:
+        is_telephony = getattr(audio_config, "transport_type", None) in {
+            "twilio",
+            "vonage",
+            "vobiz",
+            "cloudonix",
+            "ari",
+        } or audio_config.transport_out_sample_rate <= 8000
+        if is_telephony:
+            sample_rate = int(
+                getattr(
+                    user_config.tts,
+                    "telephony_sample_rate",
+                    audio_config.transport_out_sample_rate,
+                )
+                or audio_config.transport_out_sample_rate
+            )
+            # Cap telephony at 16 kHz
+            sample_rate = min(sample_rate, 16000)
+        else:
+            sample_rate = int(
+                getattr(
+                    user_config.tts,
+                    "web_sample_rate",
+                    audio_config.transport_out_sample_rate,
+                )
+                or audio_config.transport_out_sample_rate
+            )
+        sample_rate = min(sample_rate, audio_config.transport_out_sample_rate)
+        voice = getattr(user_config.tts, "voice", "Dennis") or "Dennis"
+        model_id = getattr(user_config.tts, "model", "inworld-tts-1.5-max") or "inworld-tts-1.5-max"
+        audio_encoding = getattr(user_config.tts, "audio_encoding", "PCM") or "PCM"
+        # For telephony with MULAW/ALAW transports, auto-pick encoding
+        if is_telephony and audio_encoding == "PCM":
+            transport_type = getattr(audio_config, "transport_type", None)
+            if transport_type in ("vonage", "vobiz"):
+                audio_encoding = "MULAW"  # vonage/vobiz prefer mulaw
+                logger.debug("Inworld TTS: auto-selecting MULAW for telephony transport")
+        return InworldTTSService(
+            api_key=user_config.tts.api_key,
+            voice_id=voice,
+            model_id=model_id,
+            audio_encoding=audio_encoding,
+            sample_rate=sample_rate,
+            params=InworldTTSService.InputParams(
+                temperature=float(getattr(user_config.tts, "temperature", 1.1) or 1.1),
+                speaking_rate=float(getattr(user_config.tts, "speaking_rate", 1.0) or 1.0),
+                auto_mode=bool(getattr(user_config.tts, "auto_mode", True)),
+                buffer_char_threshold=int(
+                    getattr(user_config.tts, "buffer_char_threshold", 100) or 100
+                ),
+                max_buffer_delay_ms=int(
+                    getattr(user_config.tts, "max_buffer_delay_ms", 0) or 0
+                ),
             ),
             text_filters=[xml_function_tag_filter],
         )
