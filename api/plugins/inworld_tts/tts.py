@@ -517,11 +517,10 @@ class InworldTTSService(TTSService):
             logger.debug(f"Inworld TTS flush completed for ctx {inworld_ctx}")
             # With persistent context + autoMode, flushCompleted indicates a
             # generation batch finished. The context stays open for more text.
-            # Push TTSStoppedFrame to signal this generation is done, but
-            # keep the Inworld context alive for reuse.
-            if pipeline_ctx and pipeline_ctx in self._started_pipeline_ctxs:
-                self._started_pipeline_ctxs.discard(pipeline_ctx)
-                await self.push_frame(TTSStoppedFrame(context_id=pipeline_ctx))
+            # We must NOT push a TTSStoppedFrame here, as this might be just the
+            # first sentence of a multi-sentence turn. Pipecat's base TTSService
+            # will automatically push a TTSStoppedFrame using its idle timeout queue
+            # once all audio generation actually stops flowing.
             await self.stop_ttfb_metrics()
             return
 
